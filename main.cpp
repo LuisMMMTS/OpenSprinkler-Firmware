@@ -72,7 +72,8 @@
 
 const char *user_agent_string = "OpenSprinkler/" TOSTRING(OS_FW_VERSION) "#" TOSTRING(OS_FW_MINOR);
 
-void manual_start_program(unsigned char, unsigned char, unsigned char);
+void manual_start_program(unsigned char, unsigned char);
+RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char, uint16_t, unsigned char, ProgramStruct*);
 
 // Small variations have been added to the timing values below
 // to minimize conflicting events
@@ -922,26 +923,9 @@ void do_loop()
 							if (water_time) {
 								// check if water time is still valid
 								// because it may end up being zero after scaling
-								q = pd.enqueue();
+								q = schedule_station_with_fertigation(sid, water_time, pid+1, &prog);
 								if (q) {
-									q->st = 0;
-									q->dur = water_time;
-									q->sid = sid;
-									q->pid = pid+1;
 									match_found = true;
-									
-									// schedule fertigation if enabled for this station
-									if (prog.fert[sid].enabled && os.is_fert_station(prog.fert[sid].fert_sid)) {
-										uint16_t fert_dur;
-										if (prog.fert[sid].mode == 0) {
-											// time-based: use value directly as seconds
-											fert_dur = prog.fert[sid].value;
-										} else {
-											// percentage-based: calculate from station duration
-											fert_dur = (water_time * prog.fert[sid].value) / 100;
-										}
-										os.schedule_fertigation(sid, water_time, prog.fert[sid].fert_sid, fert_dur);
-									}
 								} else {
 									// queue is full
 								}
@@ -1694,7 +1678,32 @@ void reset_all_stations(bool running_ones_only) {
  * If pid==255, this is a short test program (2 second per station)
  * If pid > 0. run program pid-1
  */
-void manual_start_program(unsigned char pid, unsigned char uwt, unsigned char qo) {
+// Common function to schedule station with fertigation
+RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_t duration, unsigned char pid, ProgramStruct* prog) {
+	RuntimeQueueStruct *q = pd.enqueue();
+	if (q) {
+		q->st = 0;
+		q->dur = duration;
+		q->sid = sid;
+		q->pid = pid;
+		
+		// Schedule fertigation if enabled for this station
+		if (prog && prog->fert[sid].enabled && os.is_fert_station(prog->fert[sid].fert_sid)) {
+			uint16_t fert_dur;
+			if (prog->fert[sid].mode == 0) {
+				// time-based: use value directly as seconds
+				fert_dur = prog->fert[sid].value;
+			} else {
+				// percentage-based: calculate from station duration
+				fert_dur = (duration * prog->fert[sid].value) / 100;
+			}
+			os.schedule_fertigation(sid, duration, prog->fert[sid].fert_sid, fert_dur);
+		}
+	}
+	return q;
+}
+
+void manual_start_program(unsigned char pid, unsigned char uwt) {
 	boolean match_found = false;
 	ProgramStruct prog;
 	ulong dur;
@@ -1728,12 +1737,8 @@ void manual_start_program(unsigned char pid, unsigned char uwt, unsigned char qo
 			dur = water_time_resolve(prog.durations[sid]);
 		dur = dur * wl / 100;
 		if(dur>0 && !(os.attrib_dis[bid]&(1<<s))) {
-			RuntimeQueueStruct *q = pd.enqueue();
+			RuntimeQueueStruct *q = schedule_station_with_fertigation(sid, dur, 254, (pid>0) ? &prog : NULL);
 			if (q) {
-				q->st = 0;
-				q->dur = dur;
-				q->sid = sid;
-				q->pid = 254;
 				match_found = true;
 			}
 		}

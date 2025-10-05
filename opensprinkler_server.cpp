@@ -917,6 +917,12 @@ void server_moveup_program(OTF_PARAMS_DEF) {
  * to:    end date of the program, same format as from
 */
 const char _str_program[] PROGMEM = "Program ";
+/** Change program
+ * API: /cp?pid=X&v=[flag,days0,days1,[start_times],[durations]]&pw=XXX
+ * Correct format: v=%5B1,0,0,%5B480,0,0,0%5D,%5B120,0,0,0,0,0,0,0%5D%5D
+ * This creates: flag=1, days=[0,0], start_times=[480,0,0,0], durations=[120,0,0,0,0,0,0,0]
+ * IMPORTANT: Must use proper URL encoding for brackets and commas
+ */
 void server_change_program(OTF_PARAMS_DEF) {
 #if defined(USE_OTF)
 	if(!process_password(OTF_PARAMS)) return;
@@ -2248,7 +2254,13 @@ void server_fill_files(OTF_PARAMS_DEF) {
 }
 */
 
-/** Change program fertigation settings */
+/** Change program fertigation settings 
+ * API: /pf?pid=X&fert=sid:enabled:mode:fert_sid:value&pw=XXX
+ * Examples:
+ *   /pf?pid=0&fert=0:1:0:2:30 - Station 0: enabled, time-based, use fert station 2, 30 seconds
+ *   /pf?pid=0&fert=0:1:1:3:25 - Station 0: enabled, percentage-based, use fert station 3, 25%
+ *   /pf?pid=0&fert=0:1:0:2:20,1:1:1:3:30 - Multiple stations
+ */
 void server_change_program_fert(OTF_PARAMS_DEF) {
 #if defined(USE_OTF)
 	if(!process_password(OTF_PARAMS)) return;
