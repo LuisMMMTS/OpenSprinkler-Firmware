@@ -3326,10 +3326,10 @@ void OpenSprinkler::schedule_fertigation(unsigned char sid, uint16_t station_dur
 	// centered timing: delay = (station_duration - fert_duration) / 2
 	uint16_t delay = (station_dur - fert_dur) / 2;
 	
-	// schedule fertigation to start after delay (relative to station start)
+	// schedule fertigation to start after delay (absolute time)
 	RuntimeQueueStruct *q = ProgramData::enqueue();
 	if(q) {
-		q->st = delay; // relative delay, not absolute time
+		q->st = now_tz() + delay; // absolute start time
 		q->dur = fert_dur;
 		q->sid = fert_sid;
 		q->pid = 99; // special program id for fertigation

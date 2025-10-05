@@ -1698,15 +1698,8 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_
 					fert_dur = (duration * prog->fert[sid].value) / 100;
 				}
 				if (fert_dur > 0 && fert_dur < duration) {
-					// Schedule fertigation station directly in queue
-					RuntimeQueueStruct *fq = pd.enqueue();
-					if (fq) {
-						uint16_t delay = (duration - fert_dur) / 2;
-						fq->st = delay;
-						fq->dur = fert_dur;
-						fq->sid = fert_sid;
-						fq->pid = 99; // special fertigation pid
-					}
+					// Use the existing schedule_fertigation function with proper timing
+					os.schedule_fertigation(sid, duration, fert_sid, fert_dur);
 				}
 			}
 		}
