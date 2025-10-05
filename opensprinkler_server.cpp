@@ -2198,19 +2198,23 @@ void server_change_fert_stations(OTF_PARAMS_DEF) {
 	char *p = get_buffer;
 #endif
 
-	// parse stations parameter
+	// reset fertigation stations
+	os.num_fert_stations = 0;
+	
+	// parse stations parameter if provided
 	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("stations"), true)) {
-		os.num_fert_stations = 0;
-		char* token = strtok(tmp_buffer, ",");
-		while(token && os.num_fert_stations < MAX_NUM_FERT_STATIONS) {
-			unsigned char sid = atoi(token);
-			if(sid < os.nstations) {
-				os.fert_stations[os.num_fert_stations++] = sid;
+		if(strlen(tmp_buffer) > 0) {  // only parse if not empty
+			char* token = strtok(tmp_buffer, ",");
+			while(token && os.num_fert_stations < MAX_NUM_FERT_STATIONS) {
+				unsigned char sid = atoi(token);
+				if(sid < os.nstations) {
+					os.fert_stations[os.num_fert_stations++] = sid;
+				}
+				token = strtok(NULL, ",");
 			}
-			token = strtok(NULL, ",");
 		}
-		os.fert_stations_save();
 	}
+	os.fert_stations_save();
 	
 #if defined(USE_OTF)
 	rewind_ether_buffer();
