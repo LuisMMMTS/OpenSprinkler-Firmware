@@ -2332,7 +2332,7 @@ const char _url_keys[] PROGMEM =
 	"db"
 	"jf"  // json fertigation stations
 	"cf"  // change fertigation stations
-	"cpf" // change program fertigation
+	"pf"  // program fertigation
 #if defined(ARDUINO)
 	//"ff"
 #endif
