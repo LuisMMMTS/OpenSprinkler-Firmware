@@ -1688,17 +1688,26 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_
 		q->pid = pid;
 		
 		// Schedule fertigation if enabled for this station
-		if (prog && prog->fert[sid].enabled) {
-			if (os.is_fert_station(prog->fert[sid].fert_sid)) {
+		if (prog && sid < MAX_NUM_STATIONS && prog->fert[sid].enabled) {
+			unsigned char fert_sid = prog->fert[sid].fert_sid;
+			if (fert_sid < MAX_NUM_STATIONS && os.is_fert_station(fert_sid)) {
 				uint16_t fert_dur;
 				if (prog->fert[sid].mode == 0) {
-					// time-based: use value directly as seconds
 					fert_dur = prog->fert[sid].value;
 				} else {
-					// percentage-based: calculate from station duration
 					fert_dur = (duration * prog->fert[sid].value) / 100;
 				}
-				os.schedule_fertigation(sid, duration, prog->fert[sid].fert_sid, fert_dur);
+				if (fert_dur > 0 && fert_dur < duration) {
+					// Schedule fertigation station directly in queue
+					RuntimeQueueStruct *fq = pd.enqueue();
+					if (fq) {
+						uint16_t delay = (duration - fert_dur) / 2;
+						fq->st = delay;
+						fq->dur = fert_dur;
+						fq->sid = fert_sid;
+						fq->pid = 99; // special fertigation pid
+					}
+				}
 			}
 		}
 	}
