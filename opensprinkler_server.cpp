@@ -1809,6 +1809,11 @@ void server_change_manual(OTF_PARAMS_DEF) {
 		handle_return(HTML_DATA_MISSING);
 	}
 
+	// protect fertigation stations from manual activation
+	if(en && os.is_fert_station(sid)) {
+		handle_return(HTML_NOT_PERMITTED);
+	}
+
 	uint16_t timer=0;
 	unsigned long curr_time = os.now_tz();
 	if (en) { // if turning on a station, must provide timer
@@ -2168,6 +2173,55 @@ void server_json_debug(OTF_PARAMS_DEF) {
 	handle_return(HTML_OK);
 }
 
+/** Get fertigation stations */
+void server_json_fert_stations(OTF_PARAMS_DEF) {
+#if defined(USE_OTF)
+	rewind_ether_buffer();
+	print_header(OTF_PARAMS);
+#else
+	print_header();
+#endif
+	bfill.emit_p(PSTR("{\"result\":1,\"fert_stations\":["));
+	for(unsigned char i=0; i<os.num_fert_stations; i++) {
+		if(i) bfill.emit_p(PSTR(","));
+		bfill.emit_p(PSTR("$D"), os.fert_stations[i]);
+	}
+	bfill.emit_p(PSTR("]}"));
+	handle_return(HTML_OK);
+}
+
+/** Change fertigation stations */
+void server_change_fert_stations(OTF_PARAMS_DEF) {
+#if defined(USE_OTF)
+	if(!process_password(OTF_PARAMS)) return;
+#else
+	char *p = get_buffer;
+#endif
+
+	// parse stations parameter
+	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("stations"), true)) {
+		os.num_fert_stations = 0;
+		char* token = strtok(tmp_buffer, ",");
+		while(token && os.num_fert_stations < MAX_NUM_FERT_STATIONS) {
+			unsigned char sid = atoi(token);
+			if(sid < os.nstations) {
+				os.fert_stations[os.num_fert_stations++] = sid;
+			}
+			token = strtok(NULL, ",");
+		}
+		os.fert_stations_save();
+	}
+	
+#if defined(USE_OTF)
+	rewind_ether_buffer();
+	print_header(OTF_PARAMS);
+#else
+	print_header();
+#endif
+	bfill.emit_p(PSTR("{\"result\":1}"));
+	handle_return(HTML_OK);
+}
+
 /*
 // fill ESP8266 flash with some dummy files
 void server_fill_files(OTF_PARAMS_DEF) {
@@ -2189,6 +2243,9 @@ void server_fill_files(OTF_PARAMS_DEF) {
 	handle_return(HTML_SUCCESS);
 }
 */
+
+void server_json_fert_stations(OTF_PARAMS_DEF);
+void server_change_fert_stations(OTF_PARAMS_DEF);
 
 typedef void (*URLHandler)(OTF_PARAMS_DEF);
 
@@ -2222,6 +2279,8 @@ const char _url_keys[] PROGMEM =
 	"ja"
 	"pq"
 	"db"
+	"jf"  // json fertigation stations
+	"cf"  // change fertigation stations
 #if defined(ARDUINO)
 	//"ff"
 #endif
@@ -2252,6 +2311,8 @@ URLHandler urls[] = {
 	server_json_all,        // ja
 	server_pause_queue,     // pq
 	server_json_debug,      // db
+	server_json_fert_stations,  // jf
+	server_change_fert_stations, // cf
 #if defined(ARDUINO)
 	//server_fill_files,
 #endif
