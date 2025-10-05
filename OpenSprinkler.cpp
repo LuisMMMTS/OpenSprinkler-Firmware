@@ -71,6 +71,10 @@ unsigned char OpenSprinkler::attrib_spe[MAX_NUM_BOARDS];
 unsigned char OpenSprinkler::attrib_grp[MAX_NUM_STATIONS];
 unsigned char OpenSprinkler::masters[NUM_MASTER_ZONES][NUM_MASTER_OPTS];
 time_os_t OpenSprinkler::masters_last_on[NUM_MASTER_ZONES];
+
+// fertigation stations
+unsigned char OpenSprinkler::fert_stations[MAX_NUM_FERT_STATIONS];
+unsigned char OpenSprinkler::num_fert_stations;
 RCSwitch OpenSprinkler::rfswitch;
 
 extern char tmp_buffer[];
@@ -1159,8 +1163,14 @@ pinModeExt(PIN_BUTTON_3, INPUT_PULLUP);
 	// detect and check RTC type
 	RTC.detect();
 
+	// load fertigation stations
+	fert_stations_load();
+
 #else
 	//DEBUG_PRINTLN(get_runtime_path());
+	
+	// load fertigation stations
+	fert_stations_load();
 #endif
 }
 
@@ -1925,6 +1935,9 @@ void OpenSprinkler::switch_special_station(unsigned char sid, unsigned char valu
  * (which results in physical actions of opening/closing valves).
  */
 unsigned char OpenSprinkler::set_station_bit(unsigned char sid, unsigned char value, uint16_t dur) {
+	// protect fertigation stations from manual activation
+	if(value && is_fert_station(sid)) return 0;
+	
 	unsigned char *data = station_bits+(sid>>3);  // pointer to the station byte
 	unsigned char mask = (unsigned char)1<<(sid&0x07); // mask
 	if (value) {
@@ -3278,3 +3291,48 @@ void OpenSprinkler::detect_expanders() {
 	}
 }
 #endif
+
+/** Fertigation functions */
+void OpenSprinkler::fert_stations_load() {
+	num_fert_stations = 0;
+	FILE *fp = fopen(get_filename_fullpath(FERT_FILENAME), "rb");
+	if(fp) {
+		fread(&num_fert_stations, 1, 1, fp);
+		if(num_fert_stations > MAX_NUM_FERT_STATIONS) num_fert_stations = 0;
+		else fread(fert_stations, 1, num_fert_stations, fp);
+		fclose(fp);
+	}
+}
+
+void OpenSprinkler::fert_stations_save() {
+	FILE *fp = fopen(get_filename_fullpath(FERT_FILENAME), "wb");
+	if(fp) {
+		fwrite(&num_fert_stations, 1, 1, fp);
+		fwrite(fert_stations, 1, num_fert_stations, fp);
+		fclose(fp);
+	}
+}
+
+unsigned char OpenSprinkler::is_fert_station(unsigned char sid) {
+	for(unsigned char i=0; i<num_fert_stations; i++) {
+		if(fert_stations[i] == sid) return 1;
+	}
+	return 0;
+}
+
+void OpenSprinkler::schedule_fertigation(unsigned char sid, uint16_t station_dur, unsigned char fert_sid, uint16_t fert_dur) {
+	if(fert_dur == 0 || fert_dur >= station_dur) return;
+	
+	// centered timing: delay = (station_duration - fert_duration) / 2
+	uint16_t delay = (station_dur - fert_dur) / 2;
+	
+	// schedule fertigation to start after delay
+	RuntimeQueueStruct *q = ProgramData::enqueue();
+	if(q) {
+		q->st = now() + delay;
+		q->dur = fert_dur;
+		q->sid = fert_sid;
+		q->pid = 99; // special program id for fertigation
+		q->deque_time = q->st + q->dur;
+	}
+}
