@@ -2202,7 +2202,7 @@ void server_change_fert_stations(OTF_PARAMS_DEF) {
 	os.num_fert_stations = 0;
 	
 	// parse stations parameter if provided
-	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("stations"), true)) {
+	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("stations"), false)) {
 		if(strlen(tmp_buffer) > 0) {  // only parse if not empty
 			char* token = strtok(tmp_buffer, ",");
 			while(token && os.num_fert_stations < MAX_NUM_FERT_STATIONS) {
