@@ -276,6 +276,10 @@ public:
 	static unsigned char masters[NUM_MASTER_ZONES][NUM_MASTER_OPTS];
 	static time_os_t masters_last_on[NUM_MASTER_ZONES];
 
+	// fertigation stations (similar to master valves)
+	static unsigned char fert_stations[MAX_NUM_FERT_STATIONS];
+	static unsigned char num_fert_stations;
+
 	// variables for time keeping
 	static time_os_t sensor1_on_timer;  // time when sensor1 is detected on last time
 	static time_os_t sensor1_off_timer; // time when sensor1 is detected off last time
@@ -365,6 +369,12 @@ public:
 	static unsigned char set_station_bit(unsigned char sid, unsigned char value, uint16_t dur=0); // set station bit of one station (sid->station index, value->0/1)
 	static unsigned char get_station_bit(unsigned char sid); // get station bit of one station (sid->station index)
 	static void switch_special_station(unsigned char sid, unsigned char value, uint16_t dur=0); // swtich special station
+
+	// fertigation functions
+	static void fert_stations_load();
+	static void fert_stations_save();
+	static unsigned char is_fert_station(unsigned char sid);
+	static void schedule_fertigation(unsigned char sid, uint16_t station_dur, unsigned char fert_sid, uint16_t fert_dur);
 	static void clear_all_station_bits(); // clear all station bits
 	static void apply_all_station_bits(void (*post_activation_callback)()=NULL); // apply all station bits (activate/deactive values)
 
