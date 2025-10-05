@@ -2248,8 +2248,55 @@ void server_fill_files(OTF_PARAMS_DEF) {
 }
 */
 
-void server_json_fert_stations(OTF_PARAMS_DEF);
+/** Change program fertigation settings */
+void server_change_program_fert(OTF_PARAMS_DEF) {
+#if defined(USE_OTF)
+	if(!process_password(OTF_PARAMS)) return;
+#else
+	char *p = get_buffer;
+#endif
+
+	int pid = -1;
+	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("pid"), false)) {
+		pid = atoi(tmp_buffer);
+		if(pid < 0 || pid >= pd.nprograms) handle_return(HTML_DATA_OUTOFBOUND);
+	} else {
+		handle_return(HTML_DATA_MISSING);
+	}
+
+	ProgramStruct prog;
+	pd.read(pid, &prog);
+
+	// parse fertigation settings: sid:enabled:mode:fert_sid:value
+	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fert"), false)) {
+		char* token = strtok(tmp_buffer, ",");
+		while(token) {
+			int sid, enabled, mode, fert_sid, value;
+			if(sscanf(token, "%d:%d:%d:%d:%d", &sid, &enabled, &mode, &fert_sid, &value) == 5) {
+				if(sid >= 0 && sid < os.nstations) {
+					prog.fert[sid].enabled = enabled ? 1 : 0;
+					prog.fert[sid].mode = mode ? 1 : 0;
+					prog.fert[sid].fert_sid = fert_sid;
+					prog.fert[sid].value = value;
+				}
+			}
+			token = strtok(NULL, ",");
+		}
+	}
+
+	pd.modify(pid, &prog);
+
+#if defined(USE_OTF)
+	rewind_ether_buffer();
+	print_header(OTF_PARAMS);
+#else
+	print_header();
+#endif
+	bfill.emit_p(PSTR("{\"result\":1}"));
+	handle_return(HTML_OK);
+}
 void server_change_fert_stations(OTF_PARAMS_DEF);
+void server_change_program_fert(OTF_PARAMS_DEF);
 
 typedef void (*URLHandler)(OTF_PARAMS_DEF);
 
@@ -2285,6 +2332,7 @@ const char _url_keys[] PROGMEM =
 	"db"
 	"jf"  // json fertigation stations
 	"cf"  // change fertigation stations
+	"cpf" // change program fertigation
 #if defined(ARDUINO)
 	//"ff"
 #endif
@@ -2317,6 +2365,7 @@ URLHandler urls[] = {
 	server_json_debug,      // db
 	server_json_fert_stations,  // jf
 	server_change_fert_stations, // cf
+	server_change_program_fert, // cpf
 #if defined(ARDUINO)
 	//server_fill_files,
 #endif
