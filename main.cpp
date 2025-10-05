@@ -929,6 +929,19 @@ void do_loop()
 									q->sid = sid;
 									q->pid = pid+1;
 									match_found = true;
+									
+									// schedule fertigation if enabled for this station
+									if (prog.fert[sid].enabled && os.is_fert_station(prog.fert[sid].fert_sid)) {
+										uint16_t fert_dur;
+										if (prog.fert[sid].mode == 0) {
+											// time-based: use value directly as seconds
+											fert_dur = prog.fert[sid].value;
+										} else {
+											// percentage-based: calculate from station duration
+											fert_dur = (water_time * prog.fert[sid].value) / 100;
+										}
+										os.schedule_fertigation(sid, water_time, prog.fert[sid].fert_sid, fert_dur);
+									}
 								} else {
 									// queue is full
 								}
