@@ -54,6 +54,12 @@ ulong  OpenSprinkler::pause_timer;
 ulong   OpenSprinkler::flowcount_log_start;
 ulong   OpenSprinkler::flowcount_rt;
 unsigned char    OpenSprinkler::button_timeout;
+
+// fertigation timer variables
+unsigned char OpenSprinkler::fert_timer_sid = 0;
+time_os_t OpenSprinkler::fert_timer_start = 0;
+uint16_t OpenSprinkler::fert_timer_duration = 0;
+unsigned char OpenSprinkler::fert_timer_active = 0;
 time_os_t  OpenSprinkler::checkwt_lasttime;
 time_os_t  OpenSprinkler::checkwt_success_lasttime;
 time_os_t  OpenSprinkler::powerup_lasttime;
@@ -3326,12 +3332,10 @@ void OpenSprinkler::schedule_fertigation(unsigned char sid, uint16_t station_dur
 	// centered timing: delay = (station_duration - fert_duration) / 2
 	uint16_t delay = (station_dur - fert_dur) / 2;
 	
-	// schedule fertigation to start after delay (absolute time)
-	RuntimeQueueStruct *q = ProgramData::enqueue();
-	if(q) {
-		q->st = now_tz() + delay; // absolute start time
-		q->dur = fert_dur;
-		q->sid = fert_sid;
-		q->pid = 99; // special program id for fertigation
-	}
+	// Direct station activation approach - bypass queue system
+	// Schedule a timer-based activation instead
+	fert_timer_sid = fert_sid;
+	fert_timer_start = now_tz() + delay;
+	fert_timer_duration = fert_dur;
+	fert_timer_active = 1;
 }

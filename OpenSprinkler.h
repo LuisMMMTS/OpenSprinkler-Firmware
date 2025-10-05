@@ -292,6 +292,12 @@ public:
 	static ulong flowcount_rt;     // flow count (for computing real-time flow rate)
 	static ulong flowcount_log_start; // starting flow count (for logging)
 
+	// fertigation timer variables
+	static unsigned char fert_timer_sid;
+	static time_os_t fert_timer_start;
+	static uint16_t fert_timer_duration;
+	static unsigned char fert_timer_active;
+
 	static unsigned char  button_timeout;    // button timeout
 	static time_os_t checkwt_lasttime;  // time when weather was checked
 	static time_os_t checkwt_success_lasttime; // time when weather check was successful
