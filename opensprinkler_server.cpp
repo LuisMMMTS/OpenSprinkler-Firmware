@@ -2137,6 +2137,13 @@ void server_json_all(OTF_PARAMS_DEF) {
 	send_packet(OTF_PARAMS);
 	bfill.emit_p(PSTR(",\"stations\":{"));
 	server_json_stations_main(OTF_PARAMS);
+	send_packet(OTF_PARAMS);
+	bfill.emit_p(PSTR(",\"fertigation\":{\"result\":1,\"fert_stations\":["));
+	for(unsigned char i=0; i<os.num_fert_stations; i++) {
+		if(i) bfill.emit_p(PSTR(","));
+		bfill.emit_p(PSTR("$D"), os.fert_stations[i]);
+	}
+	bfill.emit_p(PSTR("]}"));
 	bfill.emit_p(PSTR("}"));
 	handle_return(HTML_OK);
 }
