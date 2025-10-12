@@ -1707,9 +1707,26 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_
 		q->sid = sid;
 		q->pid = pid;
 		
-		// Hardcoded fertigation test for station 0 to bypass settings issue
-		if (sid == 0 && duration > 30) {
-			os.schedule_fertigation(sid, duration, 2, 30); // station 2, 30 seconds
+		// Check if fertigation is enabled for this station in the program
+		if (prog && sid < MAX_NUM_STATIONS && prog->fert[sid].enabled) {
+			unsigned char fert_sid = prog->fert[sid].fert_sid;
+			uint16_t fert_value = prog->fert[sid].value;
+			unsigned char fert_mode = prog->fert[sid].mode;
+			
+			// Calculate fertigation duration based on mode
+			uint16_t fert_duration = 0;
+			if (fert_mode == 0) {
+				// Time-based mode: use value directly as seconds
+				fert_duration = fert_value;
+			} else {
+				// Percentage-based mode: calculate duration from percentage
+				fert_duration = (duration * fert_value) / 100;
+			}
+			
+			// Schedule fertigation if duration is valid
+			if (fert_duration > 0 && fert_duration < duration && fert_sid < os.nstations) {
+				os.schedule_fertigation(sid, duration, fert_sid, fert_duration);
+			}
 		}
 	}
 	return q;

@@ -2377,7 +2377,7 @@ URLHandler urls[] = {
 	server_json_debug,      // db
 	server_json_fert_stations,  // jf
 	server_change_fert_stations, // cf
-	server_change_program_fert, // cpf
+	server_change_program_fert, // pf
 #if defined(ARDUINO)
 	//server_fill_files,
 #endif
