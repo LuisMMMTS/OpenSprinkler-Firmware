@@ -1723,8 +1723,8 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_
 				fert_duration = (duration * fert_value) / 100;
 			}
 			
-			// Schedule fertigation if duration is valid
-			if (fert_duration > 0 && fert_duration < duration && fert_sid < os.nstations) {
+			// Schedule fertigation if duration is valid and fertigation station is configured
+			if (fert_duration > 0 && fert_duration < duration && fert_sid < os.nstations && os.is_fert_station(fert_sid)) {
 				os.schedule_fertigation(sid, duration, fert_sid, fert_duration);
 			}
 		}
