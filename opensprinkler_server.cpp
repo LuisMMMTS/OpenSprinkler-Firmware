@@ -1694,6 +1694,32 @@ void server_change_options(OTF_PARAMS_DEF)
 	}
 	if (err)	handle_return(HTML_DATA_OUTOFBOUND);
 
+	// Handle fertigation station configuration as part of main options
+	if (findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fert1"), true) ||
+	    findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fert2"), true)) {
+		
+		// Reset fertigation stations
+		os.num_fert_stations = 0;
+		
+		// Add fert1 if specified and valid
+		if (findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fert1"), true)) {
+			unsigned char fert1 = atoi(tmp_buffer);
+			if (fert1 > 0 && fert1 <= os.nstations && os.num_fert_stations < MAX_NUM_FERT_STATIONS) {
+				os.fert_stations[os.num_fert_stations++] = fert1 - 1; // Convert from 1-based to 0-based
+			}
+		}
+		
+		// Add fert2 if specified and valid
+		if (findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fert2"), true)) {
+			unsigned char fert2 = atoi(tmp_buffer);
+			if (fert2 > 0 && fert2 <= os.nstations && fert2 != (os.num_fert_stations > 0 ? os.fert_stations[0] + 1 : 0) && os.num_fert_stations < MAX_NUM_FERT_STATIONS) {
+				os.fert_stations[os.num_fert_stations++] = fert2 - 1; // Convert from 1-based to 0-based
+			}
+		}
+		
+		os.fert_stations_save();
+	}
+
 	os.iopts_save();
 	os.populate_master();
 
