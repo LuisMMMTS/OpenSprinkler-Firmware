@@ -1184,19 +1184,16 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		// fertigation data - output duration in seconds for each station
 		// Format: [fert_duration_s0, fert_duration_s1, ..., fert_duration_sN]
 		// This adds fertigation data as the 7th element in the program array
-		for (unsigned char j=0; j<os.nstations-1; j++) {
+		for (unsigned char j=0; j<8-1; j++) {  // Force 8 stations
 			if (prog.fert[j].enabled) {
-				// Output fertigation duration in seconds for enabled stations
 				bfill.emit_p(PSTR("$D,"), (int)prog.fert[j].value);
 			} else {
-				// Output 0 for stations without fertigation enabled
 				bfill.emit_p(PSTR("0,"));
 			}
 		}
-		
-		// Handle last fertigation element (no trailing comma) and close fertigation array
-		if (prog.fert[os.nstations-1].enabled) {
-			bfill.emit_p(PSTR("$D],[$D,$D,$D]]"), (int)prog.fert[os.nstations-1].value, prog.en_daterange,prog.daterange[0],prog.daterange[1]);
+		// Handle last station (no trailing comma) and add daterange as 8th element
+		if (prog.fert[7].enabled) {
+			bfill.emit_p(PSTR("$D],[$D,$D,$D]]"), (int)prog.fert[7].value, prog.en_daterange,prog.daterange[0],prog.daterange[1]);
 		} else {
 			bfill.emit_p(PSTR("0],[$D,$D,$D]]"), prog.en_daterange,prog.daterange[0],prog.daterange[1]);
 		}
@@ -2346,6 +2343,21 @@ void server_change_program_fert(OTF_PARAMS_DEF) {
 				}
 			}
 			token = strtok(NULL, ",");
+		}
+	}
+	
+	// Also support simple fd0, fd1, fd2 format for fertigation data
+	for(int i = 0; i < os.nstations && i < MAX_NUM_STATIONS; i++) {
+		char key[8];
+		sprintf(key, "fd%d", i);
+		if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, key, false)) {
+			int value = atoi(tmp_buffer);
+			// Store fertigation data in the program's fert array
+			// This will be output as the 7th element in /jp endpoint
+			prog.fert[i].value = value;
+			prog.fert[i].enabled = (value > 0) ? 1 : 0;  // Enable if value > 0
+			prog.fert[i].mode = 0;  // Default to time-based mode
+			prog.fert[i].fert_sid = i;  // Use same station ID for fertigation
 		}
 	}
 
