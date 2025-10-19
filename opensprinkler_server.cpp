@@ -1183,18 +1183,18 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		
 		// fertigation data - output duration in seconds for each station
 		// Format: [fert_duration_s0, fert_duration_s1, ..., fert_duration_sN]
-		// Output 0 for stations without fertigation enabled
+		// This adds fertigation data as the 7th element in the program array
 		for (unsigned char j=0; j<os.nstations-1; j++) {
 			if (prog.fert[j].enabled) {
-				// Output fertigation duration in seconds
+				// Output fertigation duration in seconds for enabled stations
 				bfill.emit_p(PSTR("$D,"), (int)prog.fert[j].value);
 			} else {
-				// Station has no fertigation - output 0
+				// Output 0 for stations without fertigation enabled
 				bfill.emit_p(PSTR("0,"));
 			}
 		}
 		
-		// Handle last fertigation element (no trailing comma)
+		// Handle last fertigation element (no trailing comma) and close fertigation array
 		if (prog.fert[os.nstations-1].enabled) {
 			bfill.emit_p(PSTR("$D],[$D,$D,$D]]"), (int)prog.fert[os.nstations-1].value, prog.en_daterange,prog.daterange[0],prog.daterange[1]);
 		} else {
