@@ -1181,16 +1181,16 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		tmp_buffer[PROGRAM_NAME_SIZE] = 0;	// make sure the string ends
 		bfill.emit_p(PSTR("$S\",["), tmp_buffer);
 		// fertigation data
-		for (i=0; i<os.nstations-1; i++) {
-			if (prog.fert[i].enabled) {
-				// Output fertigation duration in seconds
-				bfill.emit_p(PSTR("$D,"), (int)prog.fert[i].value);
+		for (unsigned char j=0; j<os.nstations-1; j++) {
+			if (prog.fert[j].enabled) {
+				bfill.emit_p(PSTR("$D,"), (int)prog.fert[j].value);
 			} else {
 				bfill.emit_p(PSTR("0,"));
 			}
 		}
-		if (prog.fert[i].enabled) {
-			bfill.emit_p(PSTR("$D],[$D,$D,$D]]"), (int)prog.fert[i].value, prog.en_daterange,prog.daterange[0],prog.daterange[1]);
+		// last fertigation element
+		if (prog.fert[os.nstations-1].enabled) {
+			bfill.emit_p(PSTR("$D],[$D,$D,$D]]"), (int)prog.fert[os.nstations-1].value, prog.en_daterange,prog.daterange[0],prog.daterange[1]);
 		} else {
 			bfill.emit_p(PSTR("0],[$D,$D,$D]]"), prog.en_daterange,prog.daterange[0],prog.daterange[1]);
 		}
