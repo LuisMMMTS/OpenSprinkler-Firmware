@@ -31,7 +31,7 @@ typedef unsigned long ulong;
 #define TMP_BUFFER_SIZE      320   // scratch buffer size
 
 /** Fertigation defines */
-#define MAX_NUM_FERT_STATIONS 8    // maximum number of fertigation stations (increased for flexibility)
+#define MAX_NUM_FERT_STATIONS 1    // maximum number of fertigation stations (simplified to one)
 #define FERT_FILENAME "fert.dat"   // fertigation stations data file
 
 /** Firmware version, hardware version, and maximal values */

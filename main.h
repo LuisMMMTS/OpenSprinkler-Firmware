@@ -27,6 +27,8 @@
 #ifndef _MAIN_H
 #define _MAIN_H 1
 
+#include "program.h"  // For RuntimeQueueStruct and ProgramStruct
+
 void turn_off_station(unsigned char sid, time_os_t curr_time, unsigned char shift=0);
 void turn_off_running_station_immediate(unsigned char sid, time_os_t curr_time, unsigned char shift=0);
 void schedule_all_stations(time_os_t curr_time, unsigned char qo=0);
@@ -36,5 +38,6 @@ void reset_all_stations_immediate(bool running_ones_only=false);
 void delete_log(char *name);
 void write_log(unsigned char type, time_os_t curr_time);
 void make_logfile_name(char *name);
+RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_t duration, unsigned char pid, ProgramStruct* prog);
 
 #endif // _MAIN_H
