@@ -56,10 +56,34 @@ ulong   OpenSprinkler::flowcount_rt;
 unsigned char    OpenSprinkler::button_timeout;
 
 // fertigation timer variables
-unsigned char OpenSprinkler::fert_timer_sid = 0;
-time_os_t OpenSprinkler::fert_timer_start = 0;
-uint16_t OpenSprinkler::fert_timer_duration = 0;
-unsigned char OpenSprinkler::fert_timer_active = 0;
+// Static array definition (struct is defined in header)
+StationFertigation OpenSprinkler::station_fertigation[MAX_NUM_STATIONS];
+
+// Initialize fertigation system
+void OpenSprinkler::init_fertigation_timers() {
+	// Clear all fertigation data
+	memset(station_fertigation, 0, sizeof(station_fertigation));
+}
+
+// Stop fertigation for a specific main station
+void OpenSprinkler::stop_station_fertigation(unsigned char main_sid) {
+	if(main_sid >= MAX_NUM_STATIONS) return;
+	
+	if(station_fertigation[main_sid].active) {
+		// Turn off the fertigation station immediately
+		unsigned char fert_sid = station_fertigation[main_sid].fert_sid;
+		if(fert_sid < nstations && is_fert_station(fert_sid)) {
+			set_station_bit(fert_sid, 0, 1);  // dur=1 to bypass protection (though turning OFF should work anyway)
+		}
+		
+		// Mark fertigation as inactive
+		station_fertigation[main_sid].active = 0;
+	}
+}
+
+// Fertigation station configuration
+unsigned char OpenSprinkler::fert_stations[MAX_NUM_FERT_STATIONS];
+unsigned char OpenSprinkler::num_fert_stations;
 time_os_t  OpenSprinkler::checkwt_lasttime;
 time_os_t  OpenSprinkler::checkwt_success_lasttime;
 time_os_t  OpenSprinkler::powerup_lasttime;
@@ -78,9 +102,7 @@ unsigned char OpenSprinkler::attrib_grp[MAX_NUM_STATIONS];
 unsigned char OpenSprinkler::masters[NUM_MASTER_ZONES][NUM_MASTER_OPTS];
 time_os_t OpenSprinkler::masters_last_on[NUM_MASTER_ZONES];
 
-// fertigation stations
-unsigned char OpenSprinkler::fert_stations[MAX_NUM_FERT_STATIONS];
-unsigned char OpenSprinkler::num_fert_stations;
+// fertigation stations (defined earlier in file)
 RCSwitch OpenSprinkler::rfswitch;
 
 extern char tmp_buffer[];
@@ -1171,12 +1193,16 @@ pinModeExt(PIN_BUTTON_3, INPUT_PULLUP);
 
 	// load fertigation stations
 	fert_stations_load();
+	// initialize fertigation timers
+	init_fertigation_timers();
 
 #else
 	//DEBUG_PRINTLN(get_runtime_path());
 	
 	// load fertigation stations
 	fert_stations_load();
+	// initialize fertigation timers
+	init_fertigation_timers();
 #endif
 }
 
@@ -1941,8 +1967,8 @@ void OpenSprinkler::switch_special_station(unsigned char sid, unsigned char valu
  * (which results in physical actions of opening/closing valves).
  */
 unsigned char OpenSprinkler::set_station_bit(unsigned char sid, unsigned char value, uint16_t dur) {
-	// protect fertigation stations from manual activation
-	if(value && is_fert_station(sid)) return 0;
+	// protect fertigation stations from manual activation only (dur=0 means manual)
+	if(value && is_fert_station(sid) && dur == 0) return 0;
 	
 	unsigned char *data = station_bits+(sid>>3);  // pointer to the station byte
 	unsigned char mask = (unsigned char)1<<(sid&0x07); // mask
@@ -3307,6 +3333,10 @@ void OpenSprinkler::fert_stations_load() {
 		if(num_fert_stations > MAX_NUM_FERT_STATIONS) num_fert_stations = 0;
 		else fread(fert_stations, 1, num_fert_stations, fp);
 		fclose(fp);
+	} else {
+		// Default configuration: use station 1 (index 0) as fertigation station
+		num_fert_stations = 1;
+		fert_stations[0] = 0;  // Station 1 (0-based index)
 	}
 }
 
@@ -3327,15 +3357,14 @@ unsigned char OpenSprinkler::is_fert_station(unsigned char sid) {
 }
 
 void OpenSprinkler::schedule_fertigation(unsigned char sid, uint16_t station_dur, unsigned char fert_sid, uint16_t fert_dur) {
+	// Simple safety checks
 	if(fert_dur == 0 || fert_dur >= station_dur) return;
+	if(fert_sid >= nstations || sid >= nstations) return;
+	if(!is_fert_station(fert_sid)) return;
 	
-	// centered timing: delay = (station_duration - fert_duration) / 2
-	uint16_t delay = (station_dur - fert_dur) / 2;
-	
-	// Direct station activation approach - bypass queue system
-	// Schedule a timer-based activation instead
-	fert_timer_sid = fert_sid;
-	fert_timer_start = now_tz() + delay;
-	fert_timer_duration = fert_dur;
-	fert_timer_active = 1;
+	// Store simple fertigation data
+	station_fertigation[sid].fert_sid = fert_sid;
+	station_fertigation[sid].fert_start_time = fert_dur;     // Store fertigation duration
+	station_fertigation[sid].fert_end_time = station_dur;   // Store station duration  
+	station_fertigation[sid].active = 1;
 }

@@ -148,6 +148,14 @@ struct StationAttrib {  // station attributes
 	unsigned char reserved[2]; // reserved bytes for the future
 }; // total is 4 bytes so far
 
+/** Simple fertigation state tracking per station */
+struct StationFertigation {
+	unsigned char fert_sid;        // Which fertigation station to use
+	time_os_t fert_start_time;     // When fertigation should start
+	time_os_t fert_end_time;       // When fertigation should end
+	unsigned char active;          // Whether fertigation is scheduled for this station
+};
+
 /** Station data structure */
 struct StationData {
 	char name[STATION_NAME_SIZE];
@@ -292,11 +300,10 @@ public:
 	static ulong flowcount_rt;     // flow count (for computing real-time flow rate)
 	static ulong flowcount_log_start; // starting flow count (for logging)
 
-	// fertigation timer variables
-	static unsigned char fert_timer_sid;
-	static time_os_t fert_timer_start;
-	static uint16_t fert_timer_duration;
-	static unsigned char fert_timer_active;
+	// Fertigation system declarations
+	static StationFertigation station_fertigation[MAX_NUM_STATIONS];
+	static void init_fertigation_timers();  // Initialize fertigation system
+	static void stop_station_fertigation(unsigned char main_sid);  // Stop fertigation for a station
 
 	static unsigned char  button_timeout;    // button timeout
 	static time_os_t checkwt_lasttime;  // time when weather was checked
@@ -372,7 +379,7 @@ public:
 	static int detect_exp();      // detect the number of expansion boards
 	static unsigned char weekday_today();  // returns index of today's weekday (Monday is 0)
 
-	static unsigned char set_station_bit(unsigned char sid, unsigned char value, uint16_t dur=0); // set station bit of one station (sid->station index, value->0/1)
+	static unsigned char set_station_bit(unsigned char sid, unsigned char value, uint16_t dur=0); // set station bit of one station (sid->station index, value->0/1, dur=0 blocks fertigation stations)
 	static unsigned char get_station_bit(unsigned char sid); // get station bit of one station (sid->station index)
 	static void switch_special_station(unsigned char sid, unsigned char value, uint16_t dur=0); // swtich special station
 

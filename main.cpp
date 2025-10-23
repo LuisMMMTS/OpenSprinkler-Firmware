@@ -86,8 +86,6 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char, uint16_t, u
 #define UI_STATE_MACHINE_INTERVAL 50    // how often does ui_state_machine run (in ms)
 #define CLIENT_READ_TIMEOUT       5     // client read timeout (in seconds)
 #define DHCP_CHECKLEASE_INTERVAL  3600L // DHCP check lease interval (in seconds)
-#define FLOWPOLL_INTERVAL         5     // flow poll interval (in milli-seconds)
-#define CURRPOLL_INTERVAL         20    // current poll interval (in milli-seconds)
 // Define buffers: need them to be sufficiently large to cover string option reading
 char ether_buffer[ETHER_BUFFER_SIZE*2]; // ethernet buffer, make it twice as large to allow overflow
 char tmp_buffer[TMP_BUFFER_SIZE*2]; // scratch buffer, make it twice as large to allow overflow
@@ -109,7 +107,6 @@ unsigned char prev_flow_state = HIGH;
 float flow_last_gpm = 0;
 int32_t flow_rt_period = -1;
 uint32_t reboot_timer = 0;
-unsigned char curr_alert_sid = 0;
 
 void flow_poll() {
 	ulong curr = millis();
@@ -142,7 +139,7 @@ void flow_poll() {
 	flow_count++;
 
 	/* RAH implementation of flow sensor */
-	if (flow_start == 0) {
+	if (flow_start == 0) { 
 		flow_gallons = 0;
 		flow_start = curr;
 	} // if first pulse, record time
@@ -216,12 +213,11 @@ void ui_state_machine() {
 
 #if defined(USE_SSD1306)
 	// process screen led
-	static ulong led_toggle_prev = 0;
+	static ulong led_toggle_timeout = 0;
 	if(led_blink_ms) {
-		ulong tm = millis();
-		if(tm - led_toggle_prev > led_blink_ms) { // overflow proof timeout
+		if(millis()>led_toggle_timeout) {
 			os.toggle_screen_led();
-			led_toggle_prev = tm;
+			led_toggle_timeout = millis() + led_blink_ms;
 		}
 	}
 #endif
@@ -248,7 +244,7 @@ void ui_state_machine() {
 			if (button & BUTTON_FLAG_HOLD) {  // holding B1
 				if (digitalReadExt(PIN_BUTTON_3)==0) { // if B3 is pressed while holding B1, run a short test (internal test)
 					if(!ui_confirm(PSTR("Start 2s test?"))) {ui_state = UI_STATE_DEFAULT; break;}
-					manual_start_program(255, 0, QUEUE_OPTION_REPLACE);
+					manual_start_program(255, 0);
 				} else if (digitalReadExt(PIN_BUTTON_2)==0) { // if B2 is pressed while holding B1, display gateway IP
 					#if defined(USE_SSD1306)
 						os.lcd.setAutoDisplay(false);
@@ -324,7 +320,7 @@ void ui_state_machine() {
 							break;
 					}
 				#endif
-
+				
 				ui_state = UI_STATE_DISP_IP;
 				#if defined(USE_SSD1306)
 					os.lcd.display();
@@ -389,7 +385,7 @@ void ui_state_machine() {
 		if ((button & BUTTON_MASK)==BUTTON_3) {
 			if (button & BUTTON_FLAG_HOLD) {
 				// start
-				manual_start_program(ui_state_runprog, 0, QUEUE_OPTION_INSERT_FRONT);
+				manual_start_program(ui_state_runprog, 0);
 				ui_state = UI_STATE_DEFAULT;
 			} else {
 				ui_state_runprog = (ui_state_runprog+1) % (pd.nprograms+1);
@@ -431,9 +427,6 @@ void do_setup() {
 
 	os.begin();          // OpenSprinkler init
 	os.options_setup();  // Setup options
-#if defined(ESP8266)
-	os.setup_pd_voltage();
-#endif
 
 	pd.init();           // ProgramData init
 
@@ -549,65 +542,20 @@ void reboot_in(uint32_t ms) {
 void handle_web_request(char *p);
 #endif
 
-ulong currpoll_timeout = 0;
-void overcurrent_monitor() {
-#if defined(ARDUINO)
-	// If a zone is turning on, do immediate overcurrent monitoring here for ~50ms
-	if (curr_alert_sid) {
-		int16_t imax = os.get_imax();
-		if(imax > 0) { // disable overcurrent checking if imax==0
-			imax += OVERCURRENT_INRUSH_EXTRA; // extra margin for inrush current
-			time_os_t tn = os.now_tz();
-			unsigned char sid = curr_alert_sid - 1;
-			for(unsigned char i = 0; i < 10; i++) {
-				uint16_t curr = os.read_current();
-				if(curr > (uint16_t)imax) {
-					turn_off_running_station_immediate(sid, tn);
-					notif.add(NOTIFY_CURR_ALERT, sid, curr, CURR_ALERT_TYPE_OVER_STATION);
-					os.status.overcurrent_sid = curr_alert_sid;
-					currpoll_timeout += 1000; // delay currpoll_timeout by 1 second to give time for solenoid to reset
-					break;
-				} else {
-					delay(5);
-				}
-			}
-		}
-		curr_alert_sid = 0;
-	}
-#endif
-}
 
 /** Main Loop */
 void do_loop()
 {
-	static ulong flowpoll_timeout = 0;
+	static ulong flowpoll_timeout=0;
 	if(os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
-	// handle flow sensor using polling. Maximum freq is 1/(2*FLOWPOLL_INTERVAL)
-	// e.g. if FLOWPOLL_INTERVAL is 3ms, maximum freq is 166Hz
-		ulong tm = millis();
-		if((long)(tm-flowpoll_timeout) > 0) { // overflow proof timeout
-			flowpoll_timeout = tm+FLOWPOLL_INTERVAL;
+	// handle flow sensor using polling every 1ms (maximum freq 1/(2*1ms)=500Hz)
+		ulong curr = millis();
+		if(curr!=flowpoll_timeout) {
+			flowpoll_timeout = curr;
 			flow_poll();
 		}
 	}
 
-#if defined(ARDUINO)
-	{
-		ulong tn = millis();
-		if((long)(tn-currpoll_timeout) > 0) { // overflow proof timeout
-			int16_t curr = (int16_t)os.read_current();
-			int16_t imax = os.get_imax();
-			if((imax > 0) && (curr > imax)) {
-				reset_all_stations_immediate(true);
-				notif.add(NOTIFY_CURR_ALERT, 0, curr, CURR_ALERT_TYPE_OVER_SYSTEM);
-				os.status.overcurrent_sid = 255; // 255 indicates system overcurrent
-				currpoll_timeout = tn+1000; // pause currpoll for a second to give time for solenoids to reset
-			} else {
-				currpoll_timeout = tn+CURRPOLL_INTERVAL;
-			}
-		}
-	}
-#endif
 
 	static time_os_t last_time = 0;
 	static ulong last_minute = 0;
@@ -677,7 +625,7 @@ void do_loop()
 			os.state = OS_STATE_CONNECTED;
 			connecting_timeout = 0;
 		} else {
-			if((long)(millis()-connecting_timeout)>0) {
+			if(millis()>connecting_timeout) {
 				os.state = OS_STATE_INITIAL;
 				WiFi.disconnect(true);
 				DEBUG_PRINTLN(F("timeout"));
@@ -712,7 +660,10 @@ void do_loop()
 				otf->loop();
 				connecting_timeout = 0;
 			} else {
-				// WiFi disconnected, ESP8266 will handle re-connect
+				// todo: better handling of WiFi disconnection
+				DEBUG_PRINTLN(F("WiFi disconnected, going back to initial"));
+				os.state = OS_STATE_INITIAL;
+				WiFi.disconnect(true);
 			}
 		}
 		break;
@@ -804,23 +755,68 @@ void do_loop()
 			}
 		}
 
-		// ====== Process fertigation timer ======
-		if (os.fert_timer_active) {
-			if (curr_time >= os.fert_timer_start) {
-				if (curr_time < os.fert_timer_start + os.fert_timer_duration) {
-					// Turn on fertigation station (bypass protection)
-					unsigned char *data = os.station_bits + (os.fert_timer_sid >> 3);
-					unsigned char mask = (unsigned char)1 << (os.fert_timer_sid & 0x07);
-					*data = (*data) | mask;
-					os.apply_all_station_bits();
+		// ====== Process station-based fertigation ======
+		// Centered fertigation logic: fertigation runs in the middle of station duration
+		if (os.num_fert_stations > 0) {
+			unsigned char fert_sid = os.fert_stations[0];
+			static time_os_t station_start_times[MAX_NUM_STATIONS] = {0};
+			static uint16_t station_total_durations[MAX_NUM_STATIONS] = {0}; // Total station duration
+			static uint16_t station_fert_durations[MAX_NUM_STATIONS] = {0,0,60,540,24,0,0,0}; // Fertigation durations in seconds
+			
+			bool should_run_fert = false;
+			
+			// Check each station that needs fertigation
+			for(unsigned char sid = 2; sid <= 4; sid++) {
+				if(os.is_running(sid) && station_fert_durations[sid] > 0) {
+					// Track when station started and get its total duration
+					if(station_start_times[sid] == 0) {
+						station_start_times[sid] = curr_time;
+						// Get the station's total duration from the runtime queue
+						RuntimeQueueStruct *q = pd.queue;
+						for(unsigned char i=0; i<pd.nqueue; i++, q++) {
+							if(q->sid == sid) {
+								station_total_durations[sid] = q->dur;
+								break;
+							}
+						}
+					}
+					
+					// Calculate elapsed time since station started
+					time_os_t elapsed = curr_time - station_start_times[sid];
+					uint16_t total_dur = station_total_durations[sid];
+					uint16_t fert_dur = station_fert_durations[sid];
+					
+					// Calculate centered fertigation timing
+					if(total_dur > 0 && fert_dur > 0 && fert_dur < total_dur) {
+						// Calculate delay: (total_duration - fert_duration) / 2
+						uint16_t delay = (total_dur - fert_dur) / 2;
+						uint16_t fert_start = delay;
+						uint16_t fert_end = delay + fert_dur;
+						
+						// Check if we're within the fertigation window
+						if(elapsed >= fert_start && elapsed < fert_end) {
+							should_run_fert = true;
+							break;
+						}
+					} else if(fert_dur >= total_dur) {
+						// If fertigation duration >= station duration, run for entire duration
+						if(elapsed < total_dur) {
+							should_run_fert = true;
+							break;
+						}
+					}
 				} else {
-					// Turn off fertigation station and deactivate timer
-					unsigned char *data = os.station_bits + (os.fert_timer_sid >> 3);
-					unsigned char mask = (unsigned char)1 << (os.fert_timer_sid & 0x07);
-					*data = (*data) & (~mask);
-					os.apply_all_station_bits();
-					os.fert_timer_active = 0;
+					// Station stopped - reset tracking
+					station_start_times[sid] = 0;
+					station_total_durations[sid] = 0;
 				}
+			}
+			
+			// Turn fertigation on/off based on timing
+			if (should_run_fert && !os.is_running(fert_sid)) {
+				os.set_station_bit(fert_sid, 1, 1);  // Turn ON
+			} else if (!should_run_fert && os.is_running(fert_sid)) {
+				os.set_station_bit(fert_sid, 0, 1);  // Turn OFF
 			}
 		}
 
@@ -872,10 +868,10 @@ void do_loop()
 			reset_all_stations_immediate(); // immediately stop all stations
 		}
 		if (pswitch & 0x01) {
-			if(pd.nprograms > 0)	manual_start_program(1, 0, QUEUE_OPTION_INSERT_FRONT);
+			if(pd.nprograms > 0)	manual_start_program(1, 0);
 		}
 		if (pswitch & 0x02) {
-			if(pd.nprograms > 1)	manual_start_program(2, 0, QUEUE_OPTION_INSERT_FRONT);
+			if(pd.nprograms > 1)	manual_start_program(2, 0);
 		}
 
 		// ====== Schedule program data ======
@@ -902,25 +898,6 @@ void do_loop()
 					// get station ordering
 					unsigned char order[os.nstations];
 					prog.gen_station_runorder(runcount, order);
-
-					// prepare watering level
-					unsigned char wl = 100; // default 100%
-					if (prog.use_weather) { 							// if program is set to use weather scaling
-						if (wt_restricted > 0) wl = 0; // if watering restriction is active
-						else {
-							wl = os.iopts[IOPT_WATER_PERCENTAGE];
-							// If historical data is enabled and interval program, overwrite watering percentage with historical one.
-							if (mda == 100 && prog.type == PROGRAM_TYPE_INTERVAL && md_N > 0) {
-								// Use interval length unless longer than available data
-								if ((unsigned int)prog.days[1]-1 < md_N){
-									wl = md_scales[prog.days[1]-1];
-								} else {
-									wl = md_scales[md_N-1];
-								}
-							}
-						}
-					}
-
 					// process all selected stations
 					for(unsigned char oi=0;oi<os.nstations;oi++) {
 						sid=order[oi];
@@ -934,10 +911,13 @@ void do_loop()
 						if (prog.durations[sid] && !(os.attrib_dis[bid]&(1<<s))) {
 							// water time is scaled by watering percentage
 							ulong water_time = water_time_resolve(prog.durations[sid]);
-
-							water_time = water_time * wl / 100;
-							if (wl < 20 && water_time < 10) { // if water_percentage is less than 20% and water_time is less than 10 seconds, skip watering
-								water_time = 0;
+							// if the program is set to use weather scaling
+							if (prog.use_weather) {
+								unsigned char wl = os.iopts[IOPT_WATER_PERCENTAGE];
+								water_time = water_time * wl / 100;
+								if (wl < 20 && water_time < 10) // if water_percentage is less than 20% and water_time is less than 10 seconds
+																								// do not water
+									water_time = 0;
 							}
 
 							if (water_time) {
@@ -953,10 +933,7 @@ void do_loop()
 						}// if prog.durations[sid]
 					}// for sid
 					if(match_found) {
-						notif.add(NOTIFY_PROGRAM_SCHED, pid, prog.use_weather?wl:100);
-					} else {
-						// program being skipped e.g. due to 0% watering level
-						notif.add(NOTIFY_PROGRAM_SCHED, pid, -1, wt_restricted);
+						notif.add(NOTIFY_PROGRAM_SCHED, pid, prog.use_weather?os.iopts[IOPT_WATER_PERCENTAGE]:100);
 					}
 					//delete run-once if on final runtime (stations have already been queued)
 					if(will_delete){
@@ -968,6 +945,19 @@ void do_loop()
 			// calculate start and end time
 			if (match_found) {
 				schedule_all_stations(curr_time);
+
+				// For debugging: print out queued elements
+				/*DEBUG_PRINT("en:");
+				for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
+					DEBUG_PRINT("[");
+					DEBUG_PRINT(q->sid);
+					DEBUG_PRINT(",");
+					DEBUG_PRINT(q->dur);
+					DEBUG_PRINT(",");
+					DEBUG_PRINT(q->st);
+					DEBUG_PRINT("]");
+				}
+				DEBUG_PRINTLN("");*/
 			}
 		}//if_check_current_minute
 
@@ -1029,7 +1019,7 @@ void do_loop()
 			process_dynamic_events(curr_time);
 
 			// activate / deactivate valves
-			os.apply_all_station_bits(overcurrent_monitor);
+			os.apply_all_station_bits();
 
 			// check through runtime queue, calculate the last stop time of sequential stations
 			memset(pd.last_seq_stop_times, 0, sizeof(ulong)*NUM_SEQ_GROUPS);
@@ -1136,7 +1126,7 @@ void do_loop()
 		}
 
 		// activate/deactivate valves
-		os.apply_all_station_bits(overcurrent_monitor);
+		os.apply_all_station_bits();
 
 #if defined(USE_DISPLAY)
 		// process LCD display
@@ -1236,14 +1226,13 @@ void check_weather() {
 		// if last successful weather call timestamp is more than allowed threshold
 		// and if the selected adjustment method is not one of the manual methods
 		// reset watering percentage to 100
+		// todo: the firmware currently needs to be explicitly aware of which adjustment methods, this is not ideal
 		os.checkwt_success_lasttime = 0;
 		unsigned char method = os.iopts[IOPT_USE_WEATHER];
-		if(!(method==WEATHER_METHOD_MANUAL || method==WEATHER_METHOD_AUTORAINDELAY || method==WEATHER_METHOD_MONTHLY)) {
+		if(!(method==WEATHER_METHOD_MANUAL || method==WEATHER_METHOD_AUTORAINDELY || method==WEATHER_METHOD_MONTHLY)) {
 			os.iopts[IOPT_WATER_PERCENTAGE] = 100; // reset watering percentage to 100%
-			wt_restricted = 0; // reset wt_rawData, errCode, and md_scales array
-			wt_rawData[0] = 0;
+			wt_rawData[0] = 0; 		// reset wt_rawData and errCode
 			wt_errCode = HTTP_RQT_NOT_RECEIVED;
-			md_N = 0;
 		}
 	} else if (!os.checkwt_lasttime || (ntz > os.checkwt_lasttime + CHECK_WEATHER_TIMEOUT)) {
 		os.checkwt_lasttime = ntz;
@@ -1263,10 +1252,14 @@ void turn_on_station(unsigned char sid, ulong duration) {
 	// RAH implementation of flow sensor
 	flow_start=0;
 	//Added flow_gallons reset to station turn on.
-	flow_gallons=0;
+	flow_gallons=0;  
 
 	if (os.set_station_bit(sid, 1, duration)) {
 		notif.add(NOTIFY_STATION_ON, sid, duration);
+		
+
+		
+
 	}
 }
 
@@ -1294,31 +1287,6 @@ void handle_shift_remaining_stations(RuntimeQueueStruct* q, unsigned char gid, t
 	}
 	pd.last_seq_stop_times[gid] -= remainder;
 	pd.last_seq_stop_times[gid] += 1;
-}
-
-/** Turn off a running station immediately
- * Similar turn_off_station but assuming the station is currently running,
- * and this function does not perform logging, current detection, or notifications
- * Meant to be called in overcurrent situations to turn off a running zone right away
- */
-void turn_off_running_station_immediate(unsigned char sid, time_os_t curr_time, unsigned char shift) {
-	os.set_station_bit(sid, 0);
-	os.apply_all_station_bits();
-
-	unsigned char qid = pd.station_qid[sid];
-	RuntimeQueueStruct *q = pd.queue + qid;
-	unsigned char gid = os.get_station_gid(q->sid);
-
-	if (shift && os.is_sequential_station(sid) && !os.iopts[IOPT_REMOTE_EXT_MODE]) {
-		handle_shift_remaining_stations(q, gid, curr_time);
-	}
-
-	int16_t station_delay = water_time_decode_signed(os.iopts[IOPT_STATION_DELAY_TIME]);
-	if (q->st + q->dur + station_delay == pd.last_seq_stop_times[gid]) { // if removing last station in group
-		pd.last_seq_stop_times[gid] = 0;
-	}
-	pd.dequeue(qid);
-	pd.station_qid[sid] = 0xFF;
 }
 
 /** Turn off a station
@@ -1354,17 +1322,10 @@ void turn_off_station(unsigned char sid, time_os_t curr_time, unsigned char shif
 		if (!station_bit) { return; }
 	} //else { return; }
 
-	#if defined(ARDUINO)
-	int16_t current = (int16_t)os.read_current(true); // use ema value
-	int16_t imin = os.get_imin();
-	// if current is less than imin threshold and hardware type is AC or DC
-	// send an station undercurrent alert
-	if((current < imin) && (os.hw_type==HW_TYPE_AC || os.hw_type==HW_TYPE_DC)) {
-		notif.add(NOTIFY_CURR_ALERT, sid, current, CURR_ALERT_TYPE_UNDER);
-	}
-	#endif
-
 	os.set_station_bit(sid, 0);
+	
+	// Stop fertigation for this station when it turns off
+	os.stop_station_fertigation(sid);
 
 	// RAH implementation of flow sensor
 	if (flow_gallons > 1) {
@@ -1475,7 +1436,7 @@ void handle_master_adjustments(time_os_t curr_time, RuntimeQueueStruct *q, unsig
 
 	// in case of negative master on adjustment
 	// push back station's start time to allow sufficient time to turn on master
-	if (q->st - curr_time <= abs(start_adj)) {
+	if (q->st - curr_time < abs(start_adj)) {
 		q->st += abs(start_adj);
 		seq_start_times[gid] += abs(start_adj);
 	}
@@ -1486,103 +1447,28 @@ void handle_master_adjustments(time_os_t curr_time, RuntimeQueueStruct *q, unsig
 /** Scheduler
  * This function loops through the queue
  * and schedules the start time of each station
- * If qo>0, new stations (whose st=0) will be scheduled
- * preemptively, before existing queued stations
  */
-void schedule_all_stations(time_os_t curr_time, unsigned char qo) {
-	ulong con_start_time = curr_time;   // concurrent start time
+void schedule_all_stations(time_os_t curr_time) {
+	ulong con_start_time = curr_time + 1;   // concurrent start time
 	// if the queue is paused, make sure the start time is after the scheduled pause ends
 	if (os.status.pause_state) {
 		con_start_time += os.pause_timer;
 	}
 	int16_t station_delay = water_time_decode_signed(os.iopts[IOPT_STATION_DELAY_TIME]);
-
-	RuntimeQueueStruct *q = NULL;
-	unsigned char gid;
-	unsigned char stagger[NUM_SEQ_GROUPS]; // different sequential groups will be staggered by 1 second from each other
-	memset(stagger, 0, NUM_SEQ_GROUPS);
-	// go through the queue and see if there is any scheduled zone for each sequential group
-	for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
-		if(q->st || (!q->dur)) continue; // if this element already has a start time or is marked for reset, skip
-		gid = os.get_station_gid(q->sid);
-		stagger[gid] = 1; // mark this group
-	}
-	for(unsigned char i=1;i<NUM_SEQ_GROUPS;i++) {
-		stagger[i] += stagger[i-1]; // accumulate stagger time
-	}
-
 	ulong seq_start_times[NUM_SEQ_GROUPS];  // sequential start times
-	ulong seq_adjustments[NUM_SEQ_GROUPS];  // adjustment amounts for insert-to-front
-	memset(seq_adjustments, 0, sizeof(seq_adjustments));
+	for(unsigned char i=0;i<NUM_SEQ_GROUPS;i++) {
+		seq_start_times[i] = con_start_time;
+		// if the sequential queue already has stations running
+		if (pd.last_seq_stop_times[i] > curr_time) {
+			seq_start_times[i] = pd.last_seq_stop_times[i] + station_delay;
+		}
+	}
+	RuntimeQueueStruct *q = pd.queue;
 	unsigned char re = os.iopts[IOPT_REMOTE_EXT_MODE];
+	unsigned char gid;
 
-	// If qo>0, new zones will preempt existing, so calculate adjustment amounts first
-	if (qo>0) {
-		// First pass: calculate how much time new zones will need for each sequential group
-		for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
-			if(q->st) continue; // skip already scheduled zones
-			if(!q->dur) continue; // skip zones marked for reset
-
-			gid = os.get_station_gid(q->sid);
-
-			// Only calculate adjustments for sequential stations
-			if (os.is_sequential_station(q->sid) && !re) {
-				seq_adjustments[gid] += q->dur + station_delay;
-			}
-		}
-
-		// Second pass: adjust existing queued zones (those with st > 0)
-		for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
-			if(!q->st) continue; // skip new zones (will be scheduled later)
-			if(!q->dur) continue; // skip zones marked for reset
-
-			// Only adjust sequential stations
-			if (!os.is_sequential_station(q->sid) || re) continue;
-
-			gid = os.get_station_gid(q->sid);
-			ulong adjustment = seq_adjustments[gid] + stagger[gid];
-			if (adjustment == 0) continue; // no adjustment needed for this group
-
-			// Only adjust sequential stations in the same group
-			// If station is currently running
-			if (curr_time >= q->st && curr_time < q->st + q->dur) {
-				turn_off_station(q->sid, curr_time); // TODO: double check the logic
-				ulong remaining = q->dur - (curr_time - q->st);
-				q->st = curr_time + adjustment;
-				q->dur = remaining;
-				q->deque_time += adjustment;
-			}
-			// If station is waiting to run
-			else if (curr_time < q->st) {
-				q->st += adjustment;
-				q->deque_time += adjustment;
-			}
-			// Update last_seq_stop_times
-			if (q->st + q->dur > pd.last_seq_stop_times[gid]) {
-				pd.last_seq_stop_times[gid] = q->st + q->dur;
-			}
-		}
-
-		// Set sequential start times to current time (or after pause)
-		for(unsigned char i=0;i<NUM_SEQ_GROUPS;i++) {
-			seq_start_times[i] = con_start_time + stagger[i];
-		}
-	}
-	else {
-		// Original behavior: append new zones after existing ones
-		for(unsigned char i=0;i<NUM_SEQ_GROUPS;i++) {
-			seq_start_times[i] = con_start_time + stagger[i];
-			// if the sequential queue already has stations running
-			if (pd.last_seq_stop_times[i] > curr_time) {
-				seq_start_times[i] = pd.last_seq_stop_times[i] + station_delay;
-			}
-		}
-	}
-
-	con_start_time += (stagger[NUM_SEQ_GROUPS-1] + 1); // shift con_start_time to be 1 second after accumulated stagger time
-
-	// Third pass (or second pass if qo==0): schedule new zones (those with st=0)
-	for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
+	// go through runtime queue and calculate start time of each station
+	for(;q<pd.queue+pd.nqueue;q++) {
 		if(q->st) continue; // if this queue element has already been scheduled, skip
 		if(!q->dur) continue; // if the element has been marked to reset, skip
 		gid = os.get_station_gid(q->sid);
@@ -1597,7 +1483,7 @@ void schedule_all_stations(time_os_t curr_time, unsigned char qo) {
 			// otherwise, concurrent scheduling
 			q->st = con_start_time;
 			// stagger concurrent stations by 1 second
-			con_start_time+=1;
+			con_start_time++;
 		}
 
 		handle_master_adjustments(curr_time, q, gid, seq_start_times);
@@ -1611,87 +1497,37 @@ void schedule_all_stations(time_os_t curr_time, unsigned char qo) {
 			}
 		}
 	}
-
-	// For debugging: print out queued elements
-#if defined(ENABLE_DEBUG)
-	DEBUG_PRINTLN("queue:");
-	for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
-		DEBUG_PRINT("[");
-		DEBUG_PRINT(q->sid);
-		DEBUG_PRINT(",");
-		DEBUG_PRINT(q->dur);
-		DEBUG_PRINT(",");
-		DEBUG_PRINT(q->st);
-		DEBUG_PRINT("(");
-		DEBUG_PRINT(hour(q->st));
-		DEBUG_PRINT(":");
-		DEBUG_PRINT(minute(q->st));
-		DEBUG_PRINT(":");
-		DEBUG_PRINT(second(q->st));
-		DEBUG_PRINTLN(")]");
-	}
-	DEBUG_PRINTLN("");
-#endif
 }
 
 /** Immediately reset all stations
  * No log records will be written
- * This function is similar to reset_all_stations but is meant for
- * overcurrent situation to quickly turn off zones that are affected
  */
-void reset_all_stations_immediate(bool running_ones_only) {
-	if(running_ones_only) {
-		RuntimeQueueStruct *q = NULL;
-		time_os_t currtime = os.now_tz();
-		// first round, quickly turn off the zones and mark them for dequeue
-		for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
-			unsigned char sid = q->sid;
-			if(os.is_running(sid)) { // only turn off running stations
-				q->deque_time = currtime;
-				os.set_station_bit(sid, 0);
-			}
-			os.apply_all_station_bits();
-		}
-		// second round, properly dequeu the marked ones
-		// for removing selected elements, must traverse the queue backward
-		for(q=pd.queue+pd.nqueue-1;q>=pd.queue;q--) {
-			if(q->deque_time == currtime) {
-				// shift remaining stations (ssta=1)
-				turn_off_running_station_immediate(q->sid, currtime, 0);
-			}
-		}
-	} else {
-		os.clear_all_station_bits();
-		os.apply_all_station_bits();
-		pd.reset_runtime();
-		pd.clear_pause();
+void reset_all_stations_immediate() {
+	os.clear_all_station_bits();
+	os.apply_all_station_bits();
+	pd.reset_runtime();
+	pd.clear_pause();
+	
+	// Stop all fertigation when resetting stations
+	for(unsigned char i = 0; i < MAX_NUM_STATIONS; i++) {
+		os.station_fertigation[i].active = 0;
 	}
 }
 
 /** Reset all stations
+ * This function sets the duration of
+ * every station to 0, which causes
+ * all stations to turn off in the next processing cycle.
  * Stations will be logged
  */
-void reset_all_stations(bool running_ones_only) {
-	if(running_ones_only) {
-		RuntimeQueueStruct *q;
-		time_os_t currtime = os.now_tz();
-		// for removing selected elements, must traverse the queue backward
-		for(q=pd.queue+pd.nqueue-1;q>=pd.queue;q--) {
-			if(os.is_running(q->sid)) { // only reset running stations
-				q->deque_time = currtime;
-				// shift remaining stations (ssta=1)
-				turn_off_station(q->sid, currtime, 0);
-			}
-		}
-	} else {
-		// traverse runtime queue and assign every station's duration to 0
-		// which causes them to be dequeued in the next processing cycle
-		RuntimeQueueStruct *q;
-		for(q=pd.queue;q<pd.queue+pd.nqueue;q++) {
-			q->dur = 0;
-		}
+void reset_all_stations() {
+	RuntimeQueueStruct *q = pd.queue;
+	// go through runtime queue and assign water time to 0
+	for(;q<pd.queue+pd.nqueue;q++) {
+		q->dur = 0;
 	}
 }
+
 
 /** Manually start a program
  * If pid==0, this is a test program (1 minute per station)
@@ -1707,54 +1543,24 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_
 		q->sid = sid;
 		q->pid = pid;
 		
-		// Check if fertigation is enabled for this station in the program
-		if (prog && sid < MAX_NUM_STATIONS && prog->fert[sid].enabled) {
-			unsigned char fert_sid = prog->fert[sid].fert_sid;
-			uint16_t fert_value = prog->fert[sid].value;
-			unsigned char fert_mode = prog->fert[sid].mode;
-			
-			// Calculate fertigation duration based on mode
-			uint16_t fert_duration = 0;
-			if (fert_mode == 0) {
-				// Time-based mode: use value directly as seconds
-				fert_duration = fert_value;
-			} else {
-				// Percentage-based mode: calculate duration from percentage
-				fert_duration = (duration * fert_value) / 100;
-			}
-			
-			// Schedule fertigation if duration is valid and fertigation station is configured
-			if (fert_duration > 0 && fert_duration < duration && fert_sid < os.nstations && os.is_fert_station(fert_sid)) {
-				os.schedule_fertigation(sid, duration, fert_sid, fert_duration);
-			}
-		}
+
+		
+
 	}
 	return q;
 }
 
 void manual_start_program(unsigned char pid, unsigned char uwt) {
 	boolean match_found = false;
+	reset_all_stations_immediate();
 	ProgramStruct prog;
 	ulong dur;
 	unsigned char sid, bid, s;
-	unsigned char ns = os.nstations;
-	unsigned char order[ns];
-	// prefill with default order: ascending by index
-	for(sid=0;sid<ns;sid++) {
-		order[sid] = sid;
-	}
-
-	unsigned char wl = 100;
 	if ((pid>0)&&(pid<255)) {
 		pd.read(pid-1, &prog);
-		if(uwt) wl = os.iopts[IOPT_WATER_PERCENTAGE];
-		notif.add(NOTIFY_PROGRAM_SCHED, pid-1, wl, 1);
-		// get station ordering from program name
-		prog.gen_station_runorder(1, order);
+		notif.add(NOTIFY_PROGRAM_SCHED, pid-1, uwt?os.iopts[IOPT_WATER_PERCENTAGE]:100, 1);
 	}
-
-	for(unsigned char oi=0;oi<ns;oi++) {
-		sid=order[oi];
+	for(sid=0;sid<os.nstations;sid++) {
 		bid=sid>>3;
 		s=sid&0x07;
 		// skip if the station is a master station (because master cannot be scheduled independently
@@ -1764,7 +1570,9 @@ void manual_start_program(unsigned char pid, unsigned char uwt) {
 		if(pid==255)  dur=2;
 		else if(pid>0)
 			dur = water_time_resolve(prog.durations[sid]);
-		dur = dur * wl / 100;
+		if(uwt) {
+			dur = dur * os.iopts[IOPT_WATER_PERCENTAGE] / 100;
+		}
 		if(dur>0 && !(os.attrib_dis[bid]&(1<<s))) {
 			RuntimeQueueStruct *q = schedule_station_with_fertigation(sid, dur, 254, (pid>0) ? &prog : NULL);
 			if (q) {
@@ -1773,7 +1581,7 @@ void manual_start_program(unsigned char pid, unsigned char uwt) {
 		}
 	}
 	if(match_found) {
-		schedule_all_stations(os.now_tz(), qo);
+		schedule_all_stations(os.now_tz());
 	}
 }
 
@@ -2051,7 +1859,7 @@ static void check_network() {
 				failed = false;
 				break;
 			}
-		} while((long)(millis() - start) < PING_TIMEOUT);*/
+		} while(millis() - start < PING_TIMEOUT);*/
 		if (failed)  {
 			if(os.status.network_fails<3)  os.status.network_fails++;
 			// clamp it to 6
