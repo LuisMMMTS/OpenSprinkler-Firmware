@@ -757,52 +757,75 @@ void do_loop()
 
 		// ====== Process station-based fertigation ======
 		// Centered fertigation logic: fertigation runs in the middle of station duration
-		if (os.num_fert_stations > 0) {
-			unsigned char fert_sid = os.fert_stations[0];
+		// Temporarily bypass fert_stations check to debug program fertigation data
+		{
+			unsigned char fert_sid = 1; // Hardcode S02 (index 1) as fertigation station for debugging
 			static time_os_t station_start_times[MAX_NUM_STATIONS] = {0};
 			static uint16_t station_total_durations[MAX_NUM_STATIONS] = {0}; // Total station duration
-			static uint16_t station_fert_durations[MAX_NUM_STATIONS] = {0,0,60,540,24,0,0,0}; // Fertigation durations in seconds
 			
 			bool should_run_fert = false;
 			
-			// Check each station that needs fertigation
-			for(unsigned char sid = 2; sid <= 4; sid++) {
-				if(os.is_running(sid) && station_fert_durations[sid] > 0) {
-					// Track when station started and get its total duration
-					if(station_start_times[sid] == 0) {
-						station_start_times[sid] = curr_time;
-						// Get the station's total duration from the runtime queue
-						RuntimeQueueStruct *q = pd.queue;
-						for(unsigned char i=0; i<pd.nqueue; i++, q++) {
-							if(q->sid == sid) {
-								station_total_durations[sid] = q->dur;
-								break;
-							}
+			// Check ALL stations that need fertigation
+			for(unsigned char sid = 0; sid < os.nstations; sid++) {
+				if(os.is_running(sid)) {
+					// Get fertigation settings from the program
+					uint16_t fert_dur = 0;
+					unsigned char prog_id = 255;
+					uint16_t station_dur = 0;
+					
+					// Find this station in the runtime queue to get program ID and duration
+					RuntimeQueueStruct *q = pd.queue;
+					for(unsigned char i=0; i<pd.nqueue; i++, q++) {
+						if(q->sid == sid) {
+							prog_id = q->pid;
+							station_dur = q->dur;
+							break;
 						}
 					}
 					
-					// Calculate elapsed time since station started
-					time_os_t elapsed = curr_time - station_start_times[sid];
-					uint16_t total_dur = station_total_durations[sid];
-					uint16_t fert_dur = station_fert_durations[sid];
+					// TODO: Read fertigation settings from program data structure
+					// For now, use a simple rule: apply 50% fertigation to all running stations
+					// This needs to be fixed to properly read from prog.fert[sid] structure
+					if(station_dur > 0) {
+						fert_dur = station_dur / 2; // 50% of station duration
+					}
 					
-					// Calculate centered fertigation timing
-					if(total_dur > 0 && fert_dur > 0 && fert_dur < total_dur) {
-						// Calculate delay: (total_duration - fert_duration) / 2
-						uint16_t delay = (total_dur - fert_dur) / 2;
-						uint16_t fert_start = delay;
-						uint16_t fert_end = delay + fert_dur;
-						
-						// Check if we're within the fertigation window
-						if(elapsed >= fert_start && elapsed < fert_end) {
-							should_run_fert = true;
-							break;
+					if(fert_dur > 0) {
+						// Track when station started and get its total duration
+						if(station_start_times[sid] == 0) {
+							station_start_times[sid] = curr_time;
+							// Get the station's total duration from the runtime queue
+							RuntimeQueueStruct *q2 = pd.queue;
+							for(unsigned char i=0; i<pd.nqueue; i++, q2++) {
+								if(q2->sid == sid) {
+									station_total_durations[sid] = q2->dur;
+									break;
+								}
+							}
 						}
-					} else if(fert_dur >= total_dur) {
-						// If fertigation duration >= station duration, run for entire duration
-						if(elapsed < total_dur) {
-							should_run_fert = true;
-							break;
+						
+						// Calculate elapsed time since station started
+						time_os_t elapsed = curr_time - station_start_times[sid];
+						uint16_t total_dur = station_total_durations[sid];
+						
+						// Calculate centered fertigation timing
+						if(total_dur > 0 && fert_dur > 0 && fert_dur < total_dur) {
+							// Calculate delay: (total_duration - fert_duration) / 2
+							uint16_t delay = (total_dur - fert_dur) / 2;
+							uint16_t fert_start = delay;
+							uint16_t fert_end = delay + fert_dur;
+							
+							// Check if we're within the fertigation window
+							if(elapsed >= fert_start && elapsed < fert_end) {
+								should_run_fert = true;
+								break;
+							}
+						} else if(fert_dur >= total_dur) {
+							// If fertigation duration >= station duration, run for entire duration
+							if(elapsed < total_dur) {
+								should_run_fert = true;
+								break;
+							}
 						}
 					}
 				} else {

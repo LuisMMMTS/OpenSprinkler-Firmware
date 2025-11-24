@@ -3333,11 +3333,8 @@ void OpenSprinkler::fert_stations_load() {
 		if(num_fert_stations > MAX_NUM_FERT_STATIONS) num_fert_stations = 0;
 		else fread(fert_stations, 1, num_fert_stations, fp);
 		fclose(fp);
-	} else {
-		// Default configuration: use station 1 (index 0) as fertigation station
-		num_fert_stations = 1;
-		fert_stations[0] = 0;  // Station 1 (0-based index)
 	}
+	// No default fertigation stations - must be configured via web interface
 }
 
 void OpenSprinkler::fert_stations_save() {
