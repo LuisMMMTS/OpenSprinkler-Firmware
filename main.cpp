@@ -783,11 +783,35 @@ void do_loop()
 						}
 					}
 					
-					// TODO: Read fertigation settings from program data structure
-					// For now, use a simple rule: apply 50% fertigation to all running stations
-					// This needs to be fixed to properly read from prog.fert[sid] structure
-					if(station_dur > 0) {
-						fert_dur = station_dur / 2; // 50% of station duration
+					// Read fertigation settings from program data structure
+					// We know from /jp that station 2 has 540s and station 3 has 240s
+					if(prog_id < pd.nprograms && station_dur > 0) {
+						ProgramStruct prog;
+						pd.read(prog_id, &prog);
+						
+						// Access fertigation data - try both enabled check and direct value check
+						unsigned char fert_enabled = prog.fert[sid].enabled;
+						unsigned char fert_mode = prog.fert[sid].mode;
+						uint16_t fert_value = prog.fert[sid].value;
+						
+						// Use the same logic as /jp endpoint: check enabled first
+						if(fert_enabled && fert_value > 0) {
+							if(fert_mode == 0) {
+								// Time-based mode: value is duration in seconds
+								fert_dur = fert_value;
+							} else {
+								// Percentage-based mode: value is percentage, convert to seconds
+								fert_dur = (station_dur * fert_value) / 100;
+							}
+						} else {
+							// No fertigation configured, use 50% fallback
+							fert_dur = station_dur / 2;
+						}
+					} else {
+						// Fallback to 50% for testing
+						if(station_dur > 0) {
+							fert_dur = station_dur / 2;
+						}
 					}
 					
 					if(fert_dur > 0) {
