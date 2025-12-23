@@ -1208,9 +1208,21 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		// fertigation data - output duration in seconds for each station
 		// Format: [fert_duration_s0, fert_duration_s1, ..., fert_duration_sN]
 		// This adds fertigation data as the 7th element in the program array
+		// Note: Always output duration in seconds, converting from percentage if needed
 		for (unsigned char j=0; j<os.nstations && j<MAX_NUM_STATIONS; j++) {
-			if (prog.fert[j].enabled) {
-				bfill.emit_p(PSTR("$D"), (int)prog.fert[j].value);
+			if (prog.fert[j].enabled && prog.fert[j].value > 0) {
+				uint16_t fert_duration = 0;
+				if (prog.fert[j].mode == 0) {
+					// Time-based mode: value is already in seconds
+					fert_duration = prog.fert[j].value;
+				} else {
+					// Percentage-based mode: convert percentage to seconds
+					// Calculate based on station duration
+					if (prog.durations[j] > 0) {
+						fert_duration = (prog.durations[j] * prog.fert[j].value) / 100;
+					}
+				}
+				bfill.emit_p(PSTR("$D"), (int)fert_duration);
 			} else {
 				bfill.emit_p(PSTR("0"));
 			}
