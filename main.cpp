@@ -785,7 +785,8 @@ void do_loop()
 						uint16_t fert_dur = os.get_fertigation_duration(sid, &prog, station_dur);
 						unsigned char fert_sid = os.get_fertigation_station_id(sid, &prog);
 						
-						if(fert_dur > 0 && fert_sid > 0 && fert_sid < os.nstations) {
+						// Check if fertigation is configured and valid (fert_sid can be 0, so don't check > 0)
+						if(fert_dur > 0 && fert_sid < os.nstations && os.is_fert_station(fert_sid)) {
 							// Initialize or update fertigation tracking
 							if(!os.station_fertigation[sid].active || 
 							   os.station_fertigation[sid].fert_start_time != station_start) {
