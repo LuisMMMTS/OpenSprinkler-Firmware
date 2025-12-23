@@ -76,8 +76,11 @@ void OpenSprinkler::stop_station_fertigation(unsigned char main_sid) {
 			set_station_bit(fert_sid, 0, 1);  // dur=1 to bypass protection (though turning OFF should work anyway)
 		}
 		
-		// Mark fertigation as inactive
+		// Clear fertigation tracking
 		station_fertigation[main_sid].active = 0;
+		station_fertigation[main_sid].fert_sid = 0;
+		station_fertigation[main_sid].fert_start_time = 0;
+		station_fertigation[main_sid].fert_end_time = 0;
 	}
 }
 
@@ -3353,15 +3356,37 @@ unsigned char OpenSprinkler::is_fert_station(unsigned char sid) {
 	return 0;
 }
 
-void OpenSprinkler::schedule_fertigation(unsigned char sid, uint16_t station_dur, unsigned char fert_sid, uint16_t fert_dur) {
-	// Simple safety checks
-	if(fert_dur == 0 || fert_dur >= station_dur) return;
-	if(fert_sid >= nstations || sid >= nstations) return;
-	if(!is_fert_station(fert_sid)) return;
+// Helper function to get fertigation duration from program settings
+uint16_t OpenSprinkler::get_fertigation_duration(unsigned char sid, ProgramStruct* prog, uint16_t station_dur) {
+	if(!prog || !prog->fert[sid].enabled || prog->fert[sid].value == 0) {
+		return 0;
+	}
 	
-	// Store simple fertigation data
-	station_fertigation[sid].fert_sid = fert_sid;
-	station_fertigation[sid].fert_start_time = fert_dur;     // Store fertigation duration
-	station_fertigation[sid].fert_end_time = station_dur;   // Store station duration  
-	station_fertigation[sid].active = 1;
+	if(prog->fert[sid].mode == 0) {
+		// Time-based mode: value is duration in seconds
+		return prog->fert[sid].value;
+	} else {
+		// Percentage-based mode: value is percentage, convert to seconds
+		return (station_dur * prog->fert[sid].value) / 100;
+	}
+}
+
+// Helper function to get fertigation station ID from program settings
+unsigned char OpenSprinkler::get_fertigation_station_id(unsigned char sid, ProgramStruct* prog) {
+	if(!prog || !prog->fert[sid].enabled) {
+		return 0;
+	}
+	
+	unsigned char fert_sid = prog->fert[sid].fert_sid;
+	
+	// Validate fertigation station
+	if(fert_sid >= nstations || !is_fert_station(fert_sid)) {
+		// Use first available fertigation station as fallback
+		if(num_fert_stations > 0) {
+			return fert_stations[0];
+		}
+		return 0;  // No fertigation stations configured
+	}
+	
+	return fert_sid;
 }

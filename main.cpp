@@ -757,113 +757,83 @@ void do_loop()
 
 		// ====== Process station-based fertigation ======
 		// Centered fertigation logic: fertigation runs in the middle of station duration
-		// Temporarily bypass fert_stations check to debug program fertigation data
-		{
-			unsigned char fert_sid = 1; // Hardcode S02 (index 1) as fertigation station for debugging
-			static time_os_t station_start_times[MAX_NUM_STATIONS] = {0};
-			static uint16_t station_total_durations[MAX_NUM_STATIONS] = {0}; // Total station duration
-			
-			bool should_run_fert = false;
-			
-			// Check ALL stations that need fertigation
+		if(os.num_fert_stations > 0) {
+			// Check all stations that are running for fertigation needs
 			for(unsigned char sid = 0; sid < os.nstations; sid++) {
 				if(os.is_running(sid)) {
-					// Get fertigation settings from the program
-					uint16_t fert_dur = 0;
-					unsigned char prog_id = 255;
-					uint16_t station_dur = 0;
-					
 					// Find this station in the runtime queue to get program ID and duration
 					RuntimeQueueStruct *q = pd.queue;
+					unsigned char prog_id = 255;
+					uint16_t station_dur = 0;
+					time_os_t station_start = 0;
+					
 					for(unsigned char i=0; i<pd.nqueue; i++, q++) {
-						if(q->sid == sid) {
+						if(q->sid == sid && q->st > 0) {
 							prog_id = q->pid;
 							station_dur = q->dur;
+							station_start = q->st;
 							break;
 						}
 					}
 					
 					// Read fertigation settings from program data structure
-					// We know from /jp that station 2 has 540s and station 3 has 240s
-					if(prog_id < pd.nprograms && station_dur > 0) {
+					if(prog_id < pd.nprograms && station_dur > 0 && station_start > 0) {
 						ProgramStruct prog;
 						pd.read(prog_id, &prog);
 						
-						// Access fertigation data - try both enabled check and direct value check
-						unsigned char fert_enabled = prog.fert[sid].enabled;
-						unsigned char fert_mode = prog.fert[sid].mode;
-						uint16_t fert_value = prog.fert[sid].value;
+						// Get fertigation configuration using helper functions
+						uint16_t fert_dur = os.get_fertigation_duration(sid, &prog, station_dur);
+						unsigned char fert_sid = os.get_fertigation_station_id(sid, &prog);
 						
-						// Use the same logic as /jp endpoint: check enabled first
-						if(fert_enabled && fert_value > 0) {
-							if(fert_mode == 0) {
-								// Time-based mode: value is duration in seconds
-								fert_dur = fert_value;
-							} else {
-								// Percentage-based mode: value is percentage, convert to seconds
-								fert_dur = (station_dur * fert_value) / 100;
-							}
-						} else {
-							// No fertigation configured, use 50% fallback
-							fert_dur = station_dur / 2;
-						}
-					} else {
-						// Fallback to 50% for testing
-						if(station_dur > 0) {
-							fert_dur = station_dur / 2;
-						}
-					}
-					
-					if(fert_dur > 0) {
-						// Track when station started and get its total duration
-						if(station_start_times[sid] == 0) {
-							station_start_times[sid] = curr_time;
-							// Get the station's total duration from the runtime queue
-							RuntimeQueueStruct *q2 = pd.queue;
-							for(unsigned char i=0; i<pd.nqueue; i++, q2++) {
-								if(q2->sid == sid) {
-									station_total_durations[sid] = q2->dur;
-									break;
+						if(fert_dur > 0 && fert_sid > 0 && fert_sid < os.nstations) {
+							// Initialize or update fertigation tracking
+							if(!os.station_fertigation[sid].active || 
+							   os.station_fertigation[sid].fert_start_time != station_start) {
+								// Calculate centered fertigation timing
+								uint16_t delay = (station_dur - fert_dur) / 2;
+								
+								os.station_fertigation[sid].fert_sid = fert_sid;
+								os.station_fertigation[sid].fert_start_time = station_start + delay;
+								if(fert_dur < station_dur) {
+									os.station_fertigation[sid].fert_end_time = station_start + delay + fert_dur;
+								} else {
+									// If fertigation duration >= station duration, run for entire duration
+									os.station_fertigation[sid].fert_end_time = station_start + station_dur;
 								}
+								os.station_fertigation[sid].active = 1;
 							}
-						}
-						
-						// Calculate elapsed time since station started
-						time_os_t elapsed = curr_time - station_start_times[sid];
-						uint16_t total_dur = station_total_durations[sid];
-						
-						// Calculate centered fertigation timing
-						if(total_dur > 0 && fert_dur > 0 && fert_dur < total_dur) {
-							// Calculate delay: (total_duration - fert_duration) / 2
-							uint16_t delay = (total_dur - fert_dur) / 2;
-							uint16_t fert_start = delay;
-							uint16_t fert_end = delay + fert_dur;
 							
 							// Check if we're within the fertigation window
-							if(elapsed >= fert_start && elapsed < fert_end) {
-								should_run_fert = true;
-								break;
+							if(curr_time >= os.station_fertigation[sid].fert_start_time && 
+							   curr_time < os.station_fertigation[sid].fert_end_time) {
+								// Turn on fertigation station
+								if(!os.is_running(fert_sid)) {
+									os.set_station_bit(fert_sid, 1, 1);
+								}
+							} else {
+								// Turn off fertigation station if outside window
+								if(os.is_running(fert_sid)) {
+									os.set_station_bit(fert_sid, 0, 1);
+								}
 							}
-						} else if(fert_dur >= total_dur) {
-							// If fertigation duration >= station duration, run for entire duration
-							if(elapsed < total_dur) {
-								should_run_fert = true;
-								break;
+						} else {
+							// No fertigation configured or invalid - clear tracking
+							if(os.station_fertigation[sid].active) {
+								os.stop_station_fertigation(sid);
 							}
+						}
+					} else {
+						// Station not in queue or invalid - clear tracking
+						if(os.station_fertigation[sid].active) {
+							os.stop_station_fertigation(sid);
 						}
 					}
 				} else {
-					// Station stopped - reset tracking
-					station_start_times[sid] = 0;
-					station_total_durations[sid] = 0;
+					// Station stopped - clear fertigation tracking
+					if(os.station_fertigation[sid].active) {
+						os.stop_station_fertigation(sid);
+					}
 				}
-			}
-			
-			// Turn fertigation on/off based on timing
-			if (should_run_fert && !os.is_running(fert_sid)) {
-				os.set_station_bit(fert_sid, 1, 1);  // Turn ON
-			} else if (!should_run_fert && os.is_running(fert_sid)) {
-				os.set_station_bit(fert_sid, 0, 1);  // Turn OFF
 			}
 		}
 
@@ -1582,6 +1552,7 @@ void reset_all_stations() {
  * If pid > 0. run program pid-1
  */
 // Common function to schedule station with fertigation
+// Note: Fertigation is handled separately in the main loop based on program settings
 RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_t duration, unsigned char pid, ProgramStruct* prog) {
 	RuntimeQueueStruct *q = pd.enqueue();
 	if (q) {
@@ -1589,10 +1560,6 @@ RuntimeQueueStruct* schedule_station_with_fertigation(unsigned char sid, uint16_
 		q->dur = duration;
 		q->sid = sid;
 		q->pid = pid;
-		
-
-		
-
 	}
 	return q;
 }

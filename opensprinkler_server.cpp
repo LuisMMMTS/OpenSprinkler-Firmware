@@ -756,7 +756,19 @@ void server_change_runonce(OTF_PARAMS_DEF) {
 				prog.fert[i].enabled = 1;
 				prog.fert[i].value = fert_value;
 				prog.fert[i].mode = 0;  // Default to time-based mode
-				prog.fert[i].fert_sid = i;  // Use same station ID for fertigation
+				
+				// Find the first available fertigation station to use
+				if(os.num_fert_stations > 0) {
+					prog.fert[i].fert_sid = os.fert_stations[0];  // Default to first fertigation station
+					for(unsigned char j = 0; j < os.num_fert_stations; j++) {
+						if(os.fert_stations[j] != i) {  // Don't use the same station as fertigation source
+							prog.fert[i].fert_sid = os.fert_stations[j];
+							break;
+						}
+					}
+				} else {
+					prog.fert[i].fert_sid = 0;  // No fertigation stations configured
+				}
 			}
 		}
 	}
@@ -1196,19 +1208,18 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		// fertigation data - output duration in seconds for each station
 		// Format: [fert_duration_s0, fert_duration_s1, ..., fert_duration_sN]
 		// This adds fertigation data as the 7th element in the program array
-		for (unsigned char j=0; j<8-1; j++) {  // Force 8 stations
+		for (unsigned char j=0; j<os.nstations && j<MAX_NUM_STATIONS; j++) {
 			if (prog.fert[j].enabled) {
-				bfill.emit_p(PSTR("$D,"), (int)prog.fert[j].value);
+				bfill.emit_p(PSTR("$D"), (int)prog.fert[j].value);
 			} else {
-				bfill.emit_p(PSTR("0,"));
+				bfill.emit_p(PSTR("0"));
+			}
+			if(j < os.nstations-1 && j < MAX_NUM_STATIONS-1) {
+				bfill.emit_p(PSTR(","));
 			}
 		}
-		// Handle last station (no trailing comma) and add daterange as 8th element
-		if (prog.fert[7].enabled) {
-			bfill.emit_p(PSTR("$D],[$D,$D,$D]]"), (int)prog.fert[7].value, prog.en_daterange,prog.daterange[0],prog.daterange[1]);
-		} else {
-			bfill.emit_p(PSTR("0],[$D,$D,$D]]"), prog.en_daterange,prog.daterange[0],prog.daterange[1]);
-		}
+		// Add daterange as 8th element
+		bfill.emit_p(PSTR("],[$D,$D,$D]]"), prog.en_daterange,prog.daterange[0],prog.daterange[1]);
 		if(pid!=pd.nprograms-1) {
 			bfill.emit_p(PSTR(","));
 		}
@@ -2347,10 +2358,22 @@ void server_change_program_fert(OTF_PARAMS_DEF) {
 		while(token) {
 			int sid, enabled, mode, fert_sid, value;
 			if(sscanf(token, "%d:%d:%d:%d:%d", &sid, &enabled, &mode, &fert_sid, &value) == 5) {
-				if(sid >= 0 && sid < os.nstations) {
+				if(sid >= 0 && sid < os.nstations && sid < MAX_NUM_STATIONS) {
 					prog.fert[sid].enabled = enabled ? 1 : 0;
 					prog.fert[sid].mode = mode ? 1 : 0;
-					prog.fert[sid].fert_sid = fert_sid;
+					// Validate fertigation station ID
+					if(fert_sid >= 0 && fert_sid < os.nstations && os.is_fert_station(fert_sid)) {
+						prog.fert[sid].fert_sid = fert_sid;
+					} else if(os.num_fert_stations > 0) {
+						// Use first available fertigation station as fallback
+						prog.fert[sid].fert_sid = os.fert_stations[0];
+					} else {
+						prog.fert[sid].fert_sid = 0;
+						prog.fert[sid].enabled = 0;  // Disable if no valid fertigation station
+					}
+					// Validate value range
+					if(value < 0) value = 0;
+					if(prog.fert[sid].mode == 1 && value > 100) value = 100;  // Percentage mode: max 100%
 					prog.fert[sid].value = value;
 				}
 			}
@@ -2371,12 +2394,16 @@ void server_change_program_fert(OTF_PARAMS_DEF) {
 			prog.fert[i].mode = 0;  // Default to time-based mode
 			
 			// Find the first available fertigation station to use
-			prog.fert[i].fert_sid = 0;  // Default to station 0
-			for(unsigned char j = 0; j < os.num_fert_stations; j++) {
-				if(os.fert_stations[j] != i) {  // Don't use the same station as fertigation source
-					prog.fert[i].fert_sid = os.fert_stations[j];
-					break;
+			if(os.num_fert_stations > 0) {
+				prog.fert[i].fert_sid = os.fert_stations[0];  // Default to first fertigation station
+				for(unsigned char j = 0; j < os.num_fert_stations; j++) {
+					if(os.fert_stations[j] != i) {  // Don't use the same station as fertigation source
+						prog.fert[i].fert_sid = os.fert_stations[j];
+						break;
+					}
 				}
+			} else {
+				prog.fert[i].fert_sid = 0;  // No fertigation stations configured
 			}
 		}
 	}

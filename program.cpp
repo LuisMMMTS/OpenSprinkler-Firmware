@@ -102,6 +102,17 @@ void ProgramData::read(unsigned char pid, ProgramStruct *buf) {
 	if (pid >= nprograms) return;
 	// first unsigned char is program counter, so 1+
 	file_read_block(PROG_FILENAME, buf, 1+(ulong)pid*PROGRAMSTRUCT_SIZE, PROGRAMSTRUCT_SIZE);
+	
+	// Ensure fertigation fields are properly initialized (for backward compatibility with old files)
+	// If file was written by old firmware, fert fields will be zero, which is correct default
+	for(unsigned char i = 0; i < MAX_NUM_STATIONS; i++) {
+		// Validate fertigation station ID if enabled
+		// Note: fert_sid is now 8 bits (0-255) but still limited by MAX_NUM_STATIONS
+		if(buf->fert[i].enabled && buf->fert[i].fert_sid >= MAX_NUM_STATIONS) {
+			buf->fert[i].fert_sid = 0;  // Reset invalid fertigation station ID
+			buf->fert[i].enabled = 0;   // Disable if invalid station ID
+		}
+	}
 }
 
 /** Add a program */

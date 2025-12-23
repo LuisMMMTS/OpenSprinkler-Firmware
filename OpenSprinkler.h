@@ -245,6 +245,9 @@ struct OTCConfig {
 extern const char iopt_json_names[];
 extern const uint8_t iopt_max[];
 
+// Forward declaration for ProgramStruct (defined in program.h)
+class ProgramStruct;
+
 class OpenSprinkler {
 public:
 
@@ -387,7 +390,8 @@ public:
 	static void fert_stations_load();
 	static void fert_stations_save();
 	static unsigned char is_fert_station(unsigned char sid);
-	static void schedule_fertigation(unsigned char sid, uint16_t station_dur, unsigned char fert_sid, uint16_t fert_dur);
+	static uint16_t get_fertigation_duration(unsigned char sid, ProgramStruct* prog, uint16_t station_dur);
+	static unsigned char get_fertigation_station_id(unsigned char sid, ProgramStruct* prog);
 	static void clear_all_station_bits(); // clear all station bits
 	static void apply_all_station_bits(void (*post_activation_callback)()=NULL); // apply all station bits (activate/deactive values)
 
