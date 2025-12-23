@@ -777,10 +777,34 @@ void do_loop()
 					}
 					
 					// Read fertigation settings from program data structure
+					// Note: prog_id 254 is used for manual/run-once programs
+					// For manual programs, we need to find which program this station belongs to
+					ProgramStruct prog;
+					bool prog_valid = false;
+					
 					if(prog_id < pd.nprograms && station_dur > 0 && station_start > 0) {
-						ProgramStruct prog;
+						// Regular program - read from program data
 						pd.read(prog_id, &prog);
-						
+						prog_valid = true;
+					} else if(prog_id == 254 && station_dur > 0 && station_start > 0) {
+						// Manual program (pid=254) - find which program has this station configured
+						// Check all programs to find one that matches this station's duration and has fertigation
+						for(unsigned char p = 0; p < pd.nprograms; p++) {
+							pd.read(p, &prog);
+							ulong prog_dur = water_time_resolve(prog.durations[sid]);
+							// Match by duration (allow small difference due to rounding)
+							if(prog.durations[sid] > 0 && 
+							   (prog_dur == station_dur || (prog_dur > 0 && abs((long)prog_dur - (long)station_dur) < 5))) {
+								// Found matching program - check if it has fertigation configured
+								if(prog.fert[sid].enabled) {
+									prog_valid = true;
+									break;
+								}
+							}
+						}
+					}
+					
+					if(prog_valid && station_dur > 0 && station_start > 0) {
 						// Get fertigation configuration using helper functions
 						uint16_t fert_dur = os.get_fertigation_duration(sid, &prog, station_dur);
 						unsigned char fert_sid = os.get_fertigation_station_id(sid, &prog);
