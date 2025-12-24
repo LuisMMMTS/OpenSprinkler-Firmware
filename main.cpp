@@ -777,14 +777,15 @@ void do_loop()
 					}
 					
 					// Read fertigation settings from program data structure
-					// Note: prog_id 254 is used for manual/run-once programs
-					// For manual programs, we need to find which program this station belongs to
+					// Note: Scheduled programs use pid+1 in queue (program 0 → queue pid 1)
+					// Manual programs use pid=254 in queue
 					ProgramStruct prog;
 					bool prog_valid = false;
 					
-					if(prog_id < pd.nprograms && station_dur > 0 && station_start > 0) {
-						// Regular program - read from program data
-						pd.read(prog_id, &prog);
+					if(prog_id > 0 && prog_id <= pd.nprograms && station_dur > 0 && station_start > 0) {
+						// Scheduled program - queue pid is program index + 1
+						// So prog_id 1 = program 0, prog_id 2 = program 1, etc.
+						pd.read(prog_id - 1, &prog);
 						prog_valid = true;
 					} else if(prog_id == 254 && station_dur > 0 && station_start > 0) {
 						// Manual program (pid=254) - find which program has this station configured
