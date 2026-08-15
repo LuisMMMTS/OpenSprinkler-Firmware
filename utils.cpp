@@ -52,6 +52,8 @@ bool parse_program_duration(const char *value, uint32_t *duration) {
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
+#include <errno.h>
 
 char* get_runtime_path() {
 	static char path[PATH_MAX];
@@ -89,6 +91,32 @@ const char* get_data_dir(void) {
 
 void set_data_dir(const char *new_data_dir) {
 	data_dir = new_data_dir;
+}
+
+/** Verify the data directory exists and is writable, creating it if absent.
+ *
+ * Without this the firmware starts happily against a directory that is not
+ * there: every read misses, every write silently fails, and the controller
+ * comes up with uninitialized string options -- an unusable password nobody
+ * can authenticate against, and a UI source URL that renders whatever happens
+ * to sit adjacent in memory. Failing loudly at startup is the only useful
+ * behaviour, since the unit is unreachable either way.
+ */
+bool ensure_data_dir(void) {
+	const char *dir = get_data_dir();
+	struct stat st;
+
+	if (stat(dir, &st) == 0) {
+		if (!S_ISDIR(st.st_mode)) {
+			errno = ENOTDIR;
+			return false;
+		}
+		return access(dir, W_OK | X_OK) == 0;
+	}
+
+	if (errno != ENOENT) return false;
+	if (mkdir(dir, 0755) != 0) return false;
+	return access(dir, W_OK | X_OK) == 0;
 }
 
 char* get_filename_fullpath(const char *filename) {

@@ -405,6 +405,111 @@ def test_zero_fert_duration_never_opens():
     time.sleep(1)
 
 
+# ------------------------------------------------------- process lifecycle
+# These manage their own firmware process, so they must run before the shared
+# instance claims the port.
+
+
+def _spawn(binary, datadir):
+    return subprocess.Popen(
+        [binary, "-d", datadir],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        cwd=os.path.dirname(binary),
+    )
+
+
+def _wait_until_up(timeout=20):
+    for _ in range(timeout * 2):
+        try:
+            api("jc")
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def test_data_directory_handling(binary):
+    """A data directory that is not usable must fail loudly.
+
+    Starting against a missing directory used to succeed, leaving every option
+    uninitialized: an unusable password, and a UI source URL built from
+    whatever was adjacent in memory.
+    """
+    print("\n[startup] data directory handling")
+    parent = tempfile.mkdtemp(prefix="ostest-parent-")
+
+    # 1. absent directory, existing parent -> created, firmware comes up
+    absent = os.path.join(parent, "created-on-demand")
+    proc = _spawn(binary, absent)
+    up = _wait_until_up()
+    check("creates a missing data directory and starts", up,
+          "firmware never answered")
+    check("the directory now exists", os.path.isdir(absent))
+    check("and was populated", up and len(os.listdir(absent)) > 0,
+          f"contents: {os.listdir(absent) if os.path.isdir(absent) else 'n/a'}")
+    proc.send_signal(signal.SIGTERM)
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    time.sleep(1)
+
+    # 2. unreachable path -> refuses to start, non-zero exit, message on stderr
+    proc = _spawn(binary, "/nonexistent-parent-dir-xyz/data")
+    try:
+        _, err = proc.communicate(timeout=15)
+        rc = proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        rc, err = None, "(timed out — firmware kept running)"
+    check("refuses to start when the data directory cannot be created",
+          rc == 1, f"exit code {rc}")
+    check("explains why on stderr", "unusable" in (err or "").lower(),
+          f"stderr: {(err or '').strip()[:160]!r}")
+
+    shutil.rmtree(parent, ignore_errors=True)
+
+
+def test_sigterm_shuts_down_cleanly(binary):
+    """SIGTERM must stop the firmware deliberately rather than kill it mid-run.
+
+    Without a handler, stopping the service leaves the shift register latched,
+    so a restart during a run leaves that valve open with nothing left running
+    to close it.
+    """
+    print("\n[shutdown] SIGTERM while a station is running")
+    datadir = tempfile.mkdtemp(prefix="ostest-term-")
+    proc = _spawn(binary, datadir)
+    if not _wait_until_up():
+        check("firmware came up for the shutdown test", False)
+        proc.kill()
+        shutil.rmtree(datadir, ignore_errors=True)
+        return
+
+    ns = nstations()
+    t = ["0"] * ns
+    t[0] = "120"
+    api("cr", t=f"[{','.join(t)}]", uwt=0)
+    time.sleep(4)
+    check("a station is running before the signal", station_bits()[0] == 1,
+          f"bits: {station_bits()}")
+
+    proc.send_signal(signal.SIGTERM)
+    try:
+        rc = proc.wait(timeout=10)
+        out = proc.stdout.read() if proc.stdout else ""
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        rc, out = None, ""
+    check("exits cleanly on SIGTERM instead of being killed", rc == 0,
+          f"exit code {rc}")
+    check("reports that it turned the stations off",
+          "turning off all stations" in (out or ""),
+          f"stdout tail: {(out or '')[-160:]!r}")
+
+    shutil.rmtree(datadir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- harness
 
 def main():
@@ -412,6 +517,13 @@ def main():
         print(__doc__)
         sys.exit(2)
     binary = os.path.abspath(sys.argv[1])
+
+    # Lifecycle tests run first: each owns its own process, and the DEMO build
+    # has its HTTP port fixed at compile time so they cannot overlap with the
+    # shared instance below.
+    test_data_directory_handling(binary)
+    test_sigterm_shuts_down_cleanly(binary)
+
     datadir = tempfile.mkdtemp(prefix="ostest-")
 
     proc = subprocess.Popen(

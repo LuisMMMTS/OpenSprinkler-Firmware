@@ -114,6 +114,7 @@ void str2mac(const char *_str, unsigned char mac[]);
 #else // Arduino compatible functions for RPI/LINUX
 	const char* get_data_dir();
 	void set_data_dir(const char *new_data_dir);
+	bool ensure_data_dir(); // verify the data directory is usable, creating it if absent
 	char* get_filename_fullpath(const char *filename);
 	void delay(uint32_t ms);
 	void delayMicroseconds(uint32_t us);

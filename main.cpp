@@ -33,6 +33,11 @@
 #include "notifier.h"
 #include "fertigation.h"
 
+#if !defined(ESP8266)
+#include <signal.h>
+#include "gpio.h"
+#endif
+
 #if defined(ESP8266)
 	#include <Arduino.h>
 	ESP8266WebServer *update_server = NULL;
@@ -1941,6 +1946,37 @@ static void perform_ntp_sync() {
 }
 
 #if !defined(ESP8266) // main function for RPI/LINUX
+/** Set by SIGTERM/SIGINT; consumed by the main loop.
+ *
+ * Nothing is done in the handler itself beyond setting this flag, because
+ * turning stations off touches I2C and the shift register, neither of which
+ * is async-signal-safe.
+ */
+static volatile sig_atomic_t shutdown_signal = 0;
+
+static void request_shutdown(int sig) {
+	shutdown_signal = sig;
+}
+
+/** De-energize every station before exiting.
+ *
+ * Without this, stopping the service leaves the shift register latched in
+ * whatever state it was in, so a `systemctl restart` in the middle of a run
+ * leaves that valve open with nothing left running to close it. The log
+ * meanwhile records the station as having stopped, so the record and the
+ * hardware disagree.
+ */
+static void shutdown_stations(void) {
+	printf("Received signal %d, turning off all stations\n", (int)shutdown_signal);
+	os.clear_all_station_bits();
+	os.apply_all_station_bits();
+#if defined(OSPI)
+	// Belt and braces: drive the shift register's output-enable inactive so the
+	// outputs are dead regardless of what is latched.
+	digitalWrite(PIN_SR_OE, HIGH);
+#endif
+}
+
 int main(int argc, char *argv[]) {
 	// Disable buffering to work with systemctl journal
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -1958,11 +1994,22 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	if (!ensure_data_dir()) {
+		fprintf(stderr, "OpenSprinkler: data directory '%s' is unusable: %s\n",
+				get_data_dir(), strerror(errno));
+		return 1;
+	}
+
+	signal(SIGTERM, request_shutdown);
+	signal(SIGINT, request_shutdown);
+
 	do_setup();
 
-	while(true) {
+	while(!shutdown_signal) {
 		do_loop();
 	}
+
+	shutdown_stations();
 	return 0;
 }
 #endif
