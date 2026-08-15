@@ -104,7 +104,8 @@ public:
 	//   else: standard start time (value between 0 to 1440, by bits 0 to 10)
 	int16_t starttimes[MAX_NUM_STARTTIMES];
 
-	uint16_t durations[MAX_NUM_STATIONS];  // duration / water time of each station
+	uint16_t durations[MAX_NUM_STATIONS];     // duration / water time of each station
+	uint16_t fert_duration[MAX_NUM_STATIONS]; // fertigation seconds per station (0 = disabled)
 
 	char name[PROGRAM_NAME_SIZE];
 

@@ -806,6 +806,9 @@ void do_loop()
 						// skip if the station is a master station (because master cannot be scheduled independently
 						if (os.is_master_station(sid))
 							continue;
+						// skip if the station is the fertigation station (fertigation station cannot be scheduled independently)
+						if (os.is_fert_station(sid))
+							continue;
 
 						// TODO: compare with old code
 						uint32_t dur = prog.durations[sid];
@@ -876,8 +879,9 @@ void do_loop()
 				for(s=0;s<8;s++) {
 					unsigned char sid = bid*8+s;
 
-					// skip master stations and any station that's not in the queue
+					// skip master stations, fertigation station, and any station that's not in the queue
 					if (os.is_master_station(sid)) continue;
+					if (os.is_fert_station(sid)) continue;
 					if (pd.station_qid[sid]==255) continue;
 
 					q = pd.queue + pd.station_qid[sid];
@@ -909,6 +913,69 @@ void do_loop()
 
 			// process dynamic events
 			process_dynamic_events(curr_time);
+
+			// ====== Process station-based fertigation ======
+			// Fertigation runs centered within each station's active window.
+			// We compute whether ANY station needs the fert valve open this tick,
+			// then set the valve once — avoiding the race where station B (outside
+			// its window) would close the valve opened by concurrent station A.
+			if(os.fert_station < MAX_NUM_STATIONS) {
+				bool fert_valve_needed = false;
+				ProgramStruct prog;  // declared once; overwritten per station as needed
+
+				for(sid = 0; sid < os.nstations; sid++) {
+					if(!os.is_running(sid) || pd.station_qid[sid] >= pd.nqueue) {
+						// Station not running: clear its tracking state
+						os.station_fertigation[sid].active = 0;
+						continue;
+					}
+
+					q = pd.queue + pd.station_qid[sid];
+					unsigned char prog_id   = q->pid;
+					uint16_t      station_dur   = q->dur;
+					time_os_t     station_start = q->st;
+
+					if(station_dur == 0 || station_start == 0) continue;
+
+					// Resolve fertigation seconds for this station/run
+					uint16_t fert_dur = 0;
+					if(prog_id > 0 && prog_id <= pd.nprograms) {
+						// Scheduled program: pid in queue is 1-based index
+						pd.read(prog_id - 1, &prog);
+						fert_dur = prog.fert_duration[sid];
+					} else if(prog_id == 254 && os.has_runonce_fert) {
+						// Run-once: values stored by /cr handler
+						fert_dur = os.runonce_fert[sid];
+					}
+
+					if(fert_dur == 0) {
+						os.station_fertigation[sid].active = 0;
+						continue;
+					}
+
+					// (Re-)compute centered window only when this station starts a new run
+					if(!os.station_fertigation[sid].active ||
+					   os.station_fertigation[sid].fert_start_time != station_start) {
+						if(fert_dur > station_dur) fert_dur = station_dur;
+						uint16_t delay = (station_dur - fert_dur) / 2;
+						os.station_fertigation[sid].fert_start_time = station_start + delay;
+						os.station_fertigation[sid].fert_end_time   = station_start + delay + fert_dur;
+						os.station_fertigation[sid].active = 1;
+					}
+
+					if(curr_time >= os.station_fertigation[sid].fert_start_time &&
+					   curr_time <  os.station_fertigation[sid].fert_end_time) {
+						fert_valve_needed = true;
+					}
+				}
+
+				// Control the fertigation valve once after evaluating all stations
+				bool fert_running = os.is_running(os.fert_station);
+				if(fert_valve_needed && !fert_running)
+					os.set_station_bit(os.fert_station, 1, 1);
+				else if(!fert_valve_needed && fert_running)
+					os.set_station_bit(os.fert_station, 0, 1);
+			}
 
 			// activate / deactivate valves
 			os.apply_all_station_bits(overcurrent_monitor);
@@ -948,6 +1015,12 @@ void do_loop()
 				if(os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
 					write_log(LOGDATA_FLOWSENSE, curr_time);
 					notif.add(NOTIFY_FLOWSENSOR, (flow_count>os.flowcount_log_start)?(flow_count-os.flowcount_log_start):0);
+				}
+
+				// clear run-once fertigation state now that the queue is empty
+				if(os.has_runonce_fert) {
+					os.has_runonce_fert = false;
+					memset(os.runonce_fert, 0, sizeof(os.runonce_fert));
 				}
 
 				// in case some options have changed while executing the program
@@ -1253,6 +1326,14 @@ void turn_off_station(unsigned char sid, time_os_t curr_time, unsigned char shif
 	#endif
 
 	os.set_station_bit(sid, 0);
+	
+	// Stop fertigation for this station when it turns off
+	if(os.station_fertigation[sid].active) {
+		os.station_fertigation[sid].active = 0;
+		if(os.fert_station < MAX_NUM_STATIONS && os.is_running(os.fert_station)) {
+			os.set_station_bit(os.fert_station, 0, 1);
+		}
+	}
 
 	// RAH implementation of flow sensor
 	if (flow_gallons > 1) {
@@ -1638,6 +1719,9 @@ void manual_start_program(unsigned char pid, unsigned char uwt, unsigned char qo
 		s=sid&0x07;
 		// skip if the station is a master station (because master cannot be scheduled independently
 		if (os.is_master_station(sid))
+			continue;
+		// skip if the station is the fertigation station (fertigation station cannot be scheduled independently)
+		if (os.is_fert_station(sid))
 			continue;
 		dur = 60;
 		if(pid==255) {

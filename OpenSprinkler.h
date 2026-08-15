@@ -342,6 +342,20 @@ public:
 	static unsigned char attrib_grp[];
 	static unsigned char masters[NUM_MASTER_ZONES][NUM_MASTER_OPTS];
 	static time_os_t masters_last_on[NUM_MASTER_ZONES];
+	
+	// fertigation station configuration
+	static unsigned char fert_station;  // station ID designated as fertigation station (255 = not configured)
+	// run-once fertigation: populated by /cr handler, used by scheduler for pid==254 runs
+	static uint16_t runonce_fert[MAX_NUM_STATIONS];
+	static bool has_runonce_fert;
+	
+	// fertigation runtime tracking
+	struct StationFertigation {
+		unsigned char active:1;        // fertigation is active for this station
+		time_os_t fert_start_time;     // when to start fertigation
+		time_os_t fert_end_time;       // when to end fertigation
+	};
+	static StationFertigation station_fertigation[MAX_NUM_STATIONS];
 
 	// Per-sensor state (timers + raw/active bits). Replaces the 12 separate
 	// per-sensor timers and the 8 per-sensor bit fields that used to live in
@@ -378,6 +392,7 @@ public:
 	static unsigned char get_station_type(unsigned char sid); // get station type
 	static unsigned char is_sequential_station(unsigned char sid);
 	static unsigned char is_master_station(unsigned char sid);
+	static unsigned char is_fert_station(unsigned char sid);  // check if station is a fertigation station
 	static unsigned char bound_to_master(unsigned char sid, unsigned char mas);
 	static unsigned char get_master_id(unsigned char mas);
 	static int16_t get_on_adj(unsigned char mas);
@@ -391,6 +406,8 @@ public:
 	//static StationAttrib get_station_attrib(unsigned char sid); // get station attribute
 	static void attribs_save(); // repackage attrib bits and save (backward compatibility)
 	static void attribs_load(); // load and repackage attrib bits (backward compatibility)
+	static void fert_station_load(); // load fertigation station configuration
+	static void fert_station_save(); // save fertigation station configuration
 	static bool parse_rfstation_code(RFStationData *data, RFStationCode *code); // parse rf code into on/off/time sections
 	static void switch_rfstation(RFStationData *data, bool turnon);  // switch rf station
 	static void switch_remotestation(RemoteIPStationData *data, bool turnon, uint32_t dur=0); // switch remote IP station

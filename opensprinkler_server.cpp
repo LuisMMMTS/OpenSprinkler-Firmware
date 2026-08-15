@@ -654,6 +654,24 @@ void server_change_runonce(OTF_PARAMS_DEF) {
 	for(int i=0;i<ns;i++) {
 		dur = parse_listdata(&pv);
 		prog.durations[i] = dur > 0 ? dur : 0;
+		prog.fert_duration[i] = 0;
+	}
+
+	// Parse fertigation data for run-once if provided (fd0, fd1, fd2, etc.)
+	// Values are in seconds (app must convert % to seconds before sending).
+	// Store in os.runonce_fert[] so the scheduler can read them for pid==254 runs.
+	os.has_runonce_fert = false;
+	memset(os.runonce_fert, 0, sizeof(os.runonce_fert));
+	for(int i=0; i<ns; i++) {
+		char key[8];
+		snprintf(key, sizeof(key), "fd%d", i);
+		if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, key, false)) {
+			int fert_value = atoi(tmp_buffer);
+			if(fert_value > 0 && os.fert_station < MAX_NUM_STATIONS) {
+				os.runonce_fert[i] = (uint16_t)fert_value;
+				os.has_runonce_fert = true;
+			}
+		}
 	}
 
 	unsigned char order[ns];
@@ -921,7 +939,8 @@ void server_change_program(OTF_PARAMS_DEF) {
 	char *pv = tmp_buffer+1;
 
 	// parse headers
-	*(char*)(&prog) = parse_listdata(&pv);
+	unsigned char flag_byte = parse_listdata(&pv);
+	*(char*)(&prog) = flag_byte;
 	prog.days[0]= parse_listdata(&pv);
 	prog.days[1]= parse_listdata(&pv);
 
@@ -945,12 +964,51 @@ void server_change_program(OTF_PARAMS_DEF) {
 		prog.durations[i] = pre;
 	}
 	pv++; // this should be a ']'
+	// Parse optional fertigation array [fd0, fd1, ...] (seconds; 0 = disabled)
+	if(*pv == '[') {
+		pv++; // skip '['
+		for (i=0;i<os.nstations;i++) {
+			prog.fert_duration[i] = parse_listdata(&pv);
+		}
+		pv++; // skip ']'
+	} else {
+		memset(prog.fert_duration, 0, sizeof(prog.fert_duration));
+	}
 	pv++; // this should be a ']'
 	// parse program name
 
 	// i should be equal to os.nstations at this point
 	for(;i<MAX_NUM_STATIONS;i++) {
 		prog.durations[i] = 0;		 // clear unused field
+	}
+
+	// Parse date range enable flag AFTER parsing v=[...] so it can override the flag byte
+	// This ensures endr parameter takes precedence over the flag byte in v=[...]
+	// Always parse endr if provided, and if not provided, ensure en_daterange matches flag byte bit 7
+	if (findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("endr"), true)) {
+		unsigned char endr = atoi(tmp_buffer);
+		prog.en_daterange = (endr == 1) ? 1 : 0;
+		// Also update the flag byte to match
+		unsigned char flag = *(char*)(&prog);
+		if (endr == 1) {
+			flag |= (1 << 7);  // Set bit 7
+		} else {
+			flag &= ~(1 << 7);  // Clear bit 7
+			// Clear date range values when disabled to avoid confusion
+			prog.daterange[0] = 33;  // Default: Jan 1
+			prog.daterange[1] = 415; // Default: Dec 31
+		}
+		*(char*)(&prog) = flag;
+	} else {
+		// If endr parameter not provided, sync en_daterange with flag byte bit 7
+		// This ensures consistency between the flag byte and the en_daterange field
+		unsigned char flag = *(char*)(&prog);
+		prog.en_daterange = (flag & (1 << 7)) ? 1 : 0;
+		// If date range is disabled but dates are still set, clear them
+		if (!prog.en_daterange) {
+			prog.daterange[0] = 33;  // Default: Jan 1
+			prog.daterange[1] = 415; // Default: Dec 31
+		}
 	}
 
 	if (pid==-1) {
@@ -1071,7 +1129,13 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		for (i=0; i<os.nstations-1; i++) {
 			bfill.emit_p(PSTR("$L,"),(uint32_t)prog.durations[i]);
 		}
-		bfill.emit_p(PSTR("$L],\""),(uint32_t)prog.durations[i]); // this is the last element
+		bfill.emit_p(PSTR("$L],["),(uint32_t)prog.durations[i]); // this is the last element
+		// fertigation durations in seconds per station (0 = disabled)
+		for (i=0; i<os.nstations; i++) {
+			bfill.emit_p(PSTR("$D"), (int)prog.fert_duration[i]);
+			if(i < os.nstations-1) bfill.emit_p(PSTR(","));
+		}
+		bfill.emit_p(PSTR("],\""));
 		// program name
 		strncpy(tmp_buffer, prog.name, PROGRAM_NAME_SIZE);
 		tmp_buffer[PROGRAM_NAME_SIZE] = 0;	// make sure the string ends
@@ -1629,6 +1693,41 @@ void server_json_status(OTF_PARAMS_DEF)
 	server_json_status_main();
 	handle_return(HTML_OK);
 }
+
+/** Output fertigation station configuration
+ * Command: /jf?pw=xxx
+ * Returns: {"fert_station":X} where X is the station ID (255 = not configured)
+ */
+void server_json_fert_station(OTF_PARAMS_DEF)
+{
+	if(!process_password(OTF_PARAMS)) return;
+	begin_response(res);
+	print_header(OTF_PARAMS);
+
+	bfill.emit_p(PSTR("{\"fert_station\":$D}"), os.fert_station);
+	handle_return(HTML_OK);
+}
+
+/** Change fertigation station configuration
+ * Command: /cf?pw=xxx&fs=X
+ * fs: fertigation station ID (0-255, 255 = not configured)
+ */
+void server_change_fert_station(OTF_PARAMS_DEF)
+{
+	if(!process_password(OTF_PARAMS)) return;
+
+	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fs"), true)) {
+		unsigned char fs = atoi(tmp_buffer);
+		if(fs < MAX_NUM_STATIONS || fs == 255) {
+			os.fert_station = fs;
+			os.fert_station_save();
+			handle_return(HTML_SUCCESS);
+			return;
+		}
+	}
+	handle_return(HTML_DATA_OUTOFBOUND);
+}
+
 
 /**
  * Test station (previously manual operation)
@@ -3030,6 +3129,9 @@ void server_json_all(OTF_PARAMS_DEF) {
 	server_json_sensors_main(OTF_PARAMS);
 	//bfill.emit_p(PSTR(",\"sensor_desc\":{"));
 	//server_json_sensor_description_main(OTF_PARAMS);
+	bfill.emit_p(PSTR(",\"fertigation\":{"));
+	bfill.emit_p(PSTR("\"fert_station\":$D"), os.fert_station);
+	bfill.emit_p(PSTR("}"));
 	bfill.emit_p(PSTR("}"));
 	handle_return(HTML_OK);
 }
@@ -3201,6 +3303,8 @@ const char *uris[] PROGMEM = {
 	"ja",
 	"pq",
 	"db",
+	"jf",
+	"cf",
 #if defined(ESP8266)
 	"lf",
 #if defined(ENABLE_DEBUG)
@@ -3241,6 +3345,8 @@ URLHandler urls[] = {
 	server_json_all,        // ja
 	server_pause_queue,     // pq
 	server_json_debug,      // db
+	server_json_fert_station,   // jf
+	server_change_fert_station, // cf
 #if defined(ESP8266)
 	server_list_files,      // lf
 #if defined(ENABLE_DEBUG)
