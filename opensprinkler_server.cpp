@@ -655,7 +655,6 @@ void server_change_runonce(OTF_PARAMS_DEF) {
 	for(int i=0;i<ns;i++) {
 		dur = parse_listdata(&pv);
 		prog.durations[i] = dur > 0 ? dur : 0;
-		prog.fert_duration[i] = 0;
 	}
 
 	// Parse optional per-station fertigation seconds (fd0, fd1, ...).

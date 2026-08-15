@@ -57,7 +57,6 @@ bool set_station(unsigned char sid);
 
 void clear_runonce();
 void set_runonce(unsigned char sid, int seconds); // ignores values <= 0
-bool has_runonce();
 
 // ---- program payload ----
 

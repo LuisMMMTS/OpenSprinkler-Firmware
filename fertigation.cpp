@@ -71,7 +71,10 @@ bool is_station(unsigned char sid) {
 }
 
 bool set_station(unsigned char sid) {
-	if (sid >= MAX_NUM_STATIONS && sid != FERT_STATION_NONE) return false;
+	// Validate against the stations that actually exist, not the compile-time
+	// maximum: designating a station the controller does not have is silently
+	// inert and impossible to diagnose from the UI.
+	if (sid >= os.nstations && sid != FERT_STATION_NONE) return false;
 	station = sid;
 	save();
 	return true;
@@ -92,10 +95,6 @@ void set_runonce(unsigned char sid, int seconds) {
 		runonce[sid] = (uint16_t)seconds;
 		runonce_set = true;
 	}
-}
-
-bool has_runonce() {
-	return runonce_set;
 }
 
 // ---- program payload ----

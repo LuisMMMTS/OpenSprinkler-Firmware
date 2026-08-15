@@ -106,6 +106,16 @@ def test_fert_station_config():
     check("rejected write did not clobber the stored value",
           api("jf")["fert_station"] == 3)
 
+    # Below MAX_NUM_STATIONS but beyond the boards actually attached. This used
+    # to be accepted, leaving the fertigation valve pointed at a station that
+    # does not exist and silently never firing.
+    absent = nstations() + 4
+    r = api("cf", fs=absent)
+    check(f"rejects station {absent}, which this controller does not have",
+          r["result"] == OUT_OF_BOUND, f"expected {OUT_OF_BOUND}, got {r}")
+    check("rejected absent-station write did not clobber the stored value",
+          api("jf")["fert_station"] == 3)
+
     r = api("cf", fs=255)
     check("accepts 255 to unconfigure", r["result"] == OK, f"got {r}")
     check("unconfigure persists", api("jf")["fert_station"] == 255)
