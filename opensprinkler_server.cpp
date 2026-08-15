@@ -28,6 +28,7 @@
 #include "bfiller.h"
 #include "weather.h"
 #include "mqtt.h"
+#include "fertigation.h"
 #include "main.h"
 
 // External variables defined in main ion file
@@ -657,20 +658,14 @@ void server_change_runonce(OTF_PARAMS_DEF) {
 		prog.fert_duration[i] = 0;
 	}
 
-	// Parse fertigation data for run-once if provided (fd0, fd1, fd2, etc.)
-	// Values are in seconds (app must convert % to seconds before sending).
-	// Store in os.runonce_fert[] so the scheduler can read them for pid==254 runs.
-	os.has_runonce_fert = false;
-	memset(os.runonce_fert, 0, sizeof(os.runonce_fert));
+	// Parse optional per-station fertigation seconds (fd0, fd1, ...).
+	// The app converts its percentage to seconds before sending.
+	Fertigation::clear_runonce();
 	for(int i=0; i<ns; i++) {
 		char key[8];
 		snprintf(key, sizeof(key), "fd%d", i);
 		if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, key, false)) {
-			int fert_value = atoi(tmp_buffer);
-			if(fert_value > 0 && os.fert_station < MAX_NUM_STATIONS) {
-				os.runonce_fert[i] = (uint16_t)fert_value;
-				os.has_runonce_fert = true;
-			}
+			Fertigation::set_runonce(i, atoi(tmp_buffer));
 		}
 	}
 
@@ -964,16 +959,7 @@ void server_change_program(OTF_PARAMS_DEF) {
 		prog.durations[i] = pre;
 	}
 	pv++; // this should be a ']'
-	// Parse optional fertigation array [fd0, fd1, ...] (seconds; 0 = disabled)
-	if(*pv == '[') {
-		pv++; // skip '['
-		for (i=0;i<os.nstations;i++) {
-			prog.fert_duration[i] = parse_listdata(&pv);
-		}
-		pv++; // skip ']'
-	} else {
-		memset(prog.fert_duration, 0, sizeof(prog.fert_duration));
-	}
+	Fertigation::parse_program_array(prog, &pv);
 	pv++; // this should be a ']'
 	// parse program name
 
@@ -1704,7 +1690,7 @@ void server_json_fert_station(OTF_PARAMS_DEF)
 	begin_response(res);
 	print_header(OTF_PARAMS);
 
-	bfill.emit_p(PSTR("{\"fert_station\":$D}"), os.fert_station);
+	bfill.emit_p(PSTR("{\"fert_station\":$D}"), Fertigation::station);
 	handle_return(HTML_OK);
 }
 
@@ -1717,10 +1703,7 @@ void server_change_fert_station(OTF_PARAMS_DEF)
 	if(!process_password(OTF_PARAMS)) return;
 
 	if(findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("fs"), true)) {
-		unsigned char fs = atoi(tmp_buffer);
-		if(fs < MAX_NUM_STATIONS || fs == 255) {
-			os.fert_station = fs;
-			os.fert_station_save();
+		if(Fertigation::set_station((unsigned char)atoi(tmp_buffer))) {
 			handle_return(HTML_SUCCESS);
 			return;
 		}
@@ -3130,7 +3113,7 @@ void server_json_all(OTF_PARAMS_DEF) {
 	//bfill.emit_p(PSTR(",\"sensor_desc\":{"));
 	//server_json_sensor_description_main(OTF_PARAMS);
 	bfill.emit_p(PSTR(",\"fertigation\":{"));
-	bfill.emit_p(PSTR("\"fert_station\":$D"), os.fert_station);
+	bfill.emit_p(PSTR("\"fert_station\":$D"), Fertigation::station);
 	bfill.emit_p(PSTR("}"));
 	bfill.emit_p(PSTR("}"));
 	handle_return(HTML_OK);
