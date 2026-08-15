@@ -142,10 +142,17 @@ def test_fert_station_config():
 # --------------------------------------------------------- program encoding
 
 PROG_ENABLED = 1 << 0
+# starttime_type: 0 = repeating (starttimes[1] and [2] are repeat count and
+# interval), 1 = fixed start times. Leaving this clear while passing -1 for the
+# unused start-time slots feeds -1 in as the repeat count, which schedules a
+# spurious run. Always set it for fixed-start programs.
+PROG_FIXED_START = 1 << 6
 PROG_EN_DATERANGE = 1 << 7  # en_daterange is the last 1-bit field of the flag byte
 
+DEFAULT_FLAG = PROG_ENABLED | PROG_FIXED_START
 
-def make_program(durations, fert=None, name="test", start=0, flag=PROG_ENABLED):
+
+def make_program(durations, fert=None, name="test", start=0, flag=DEFAULT_FLAG):
     """Build the packed `v=` payload for /cp."""
     ns = len(durations)
     starts = [start, -1, -1, -1]
@@ -201,7 +208,7 @@ def test_program_name_and_daterange():
     ferts = [20] + [0] * (ns - 1)
 
     r = api("cp", pid=-1,
-            v=make_program(durs, ferts, flag=PROG_ENABLED | PROG_EN_DATERANGE),
+            v=make_program(durs, ferts, flag=DEFAULT_FLAG | PROG_EN_DATERANGE),
             name="MyProgram", **{"from": 33, "to": 415})
     check("program with name + date range is accepted", r["result"] == OK, f"got {r}")
 
