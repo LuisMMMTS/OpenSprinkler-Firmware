@@ -190,6 +190,20 @@ enum {
 #define DEFAULT_OTC_SERVER_APP    "cloud.openthings.io"
 #define DEFAULT_OTC_PORT_APP       443
 #define DEFAULT_OTC_TOKEN_LENGTH   32
+
+/** Notification events enabled on a factory-fresh controller.
+ *
+ * The mask is 16 bits split across two byte-sized options: IOPT_NOTIF_ENABLE
+ * is the low byte, IOPT_NOTIF2_ENABLE the high one. Upstream defaults both to
+ * zero, so a new unit publishes nothing over MQTT until someone sets them by
+ * hand -- easy to forget, and the omission is silent: the controller looks
+ * healthy while the fleet dashboard shows it doing nothing.
+ *
+ * These defaults turn on the events worth having on a remote unit. They apply
+ * to a fresh iopts.dat only; an existing controller keeps whatever it has.
+ */
+#define DEFAULT_NOTIF_ENABLE  (NOTIFY_PROGRAM_SCHED | NOTIFY_REBOOT | NOTIFY_STATION_OFF)          // low byte:  0x31
+#define DEFAULT_NOTIF2_ENABLE ((NOTIFY_STATION_ON | NOTIFY_FLOW_ALERT | NOTIFY_CURR_ALERT) >> 8)   // high byte: 0x07
 #define DEFAULT_DEVICE_NAME       "My OpenSprinkler"
 #define DEFAULT_EMPTY_STRING      ""
 #define DEFAULT_UNDERCURRENT_THRESHOLD 100 // in mA

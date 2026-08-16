@@ -3,12 +3,27 @@ Description=OpenSprinkler
 Wants=network-online.target
 After=network.target network-online.target
 
+# The scheduler compares wall-clock time against program start minutes and has
+# no notion of the clock being untrustworthy, so starting before the first NTP
+# sync means running against whatever fake-hwclock restored. On a unit waiting
+# for a cellular link that window is real. Requires systemd-time-wait-sync to
+# be enabled, otherwise this target is reached immediately and means nothing:
+#     sudo systemctl enable --now systemd-time-wait-sync
+Wants=time-sync.target
+After=time-sync.target
+
 [Service]
 Type=simple
 Restart=always
 RestartSec=1
 User=root
 WorkingDirectory=__OpenSprinkler_Path__
+
+# Controller data lives outside the source tree, so re-cloning or cleaning the
+# repository cannot destroy the configuration. StateDirectory creates and owns
+# /var/lib/opensprinkler; the firmware refuses to start if it is unusable.
+StateDirectory=opensprinkler
+Environment=OS_DATA_DIR=/var/lib/opensprinkler
 ExecStart=/bin/bash -c ./startOpenSprinkler.sh
 StandardError=journal
 StandardOutput=journal
