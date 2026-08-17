@@ -958,9 +958,18 @@ void server_change_program(OTF_PARAMS_DEF) {
 		prog.durations[i] = pre;
 	}
 	pv++; // this should be a ']'
-	Fertigation::parse_program_array(prog, &pv);
-	pv++; // this should be a ']'
+	pv++; // this should be a ']' (closes v=; the array ends at durations, as stock)
 	// parse program name
+
+	// Fertigation durations arrive in a separate "pf" parameter rather than
+	// inside v=, so v= is byte-identical to what the stock UI sends. Stock
+	// clients omit pf and the program simply carries no fertigation.
+	if (findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("pf"), true)) {
+		char *pfp = tmp_buffer;
+		Fertigation::parse_program_array(prog, &pfp);
+	} else {
+		memset(prog.fert_duration, 0, sizeof(prog.fert_duration));
+	}
 
 	// i should be equal to os.nstations at this point
 	for(;i<MAX_NUM_STATIONS;i++) {
@@ -1114,13 +1123,7 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 		for (i=0; i<os.nstations-1; i++) {
 			bfill.emit_p(PSTR("$L,"),(uint32_t)prog.durations[i]);
 		}
-		bfill.emit_p(PSTR("$L],["),(uint32_t)prog.durations[i]); // this is the last element
-		// fertigation durations in seconds per station (0 = disabled)
-		for (i=0; i<os.nstations; i++) {
-			bfill.emit_p(PSTR("$D"), (int)prog.fert_duration[i]);
-			if(i < os.nstations-1) bfill.emit_p(PSTR(","));
-		}
-		bfill.emit_p(PSTR("],\""));
+		bfill.emit_p(PSTR("$L],\""),(uint32_t)prog.durations[i]); // this is the last element
 		// program name
 		strncpy(tmp_buffer, prog.name, PROGRAM_NAME_SIZE);
 		tmp_buffer[PROGRAM_NAME_SIZE] = 0;	// make sure the string ends
@@ -1139,6 +1142,16 @@ void server_json_programs_main(OTF_PARAMS_DEF) {
 				bfill.emit_p(PSTR("{}"));
 			}
 		}
+		// Fertigation durations (seconds/station) as the LAST field, after the
+		// stock fields (name at 5, date range at 6, sensor adjustment at 7). The
+		// stock UI reads up to index 7 and ignores this trailing field, so the
+		// program object stays readable by both UIs.
+		bfill.emit_p(PSTR(",["));
+		for (i=0; i<os.nstations; i++) {
+			bfill.emit_p(PSTR("$D"), (int)prog.fert_duration[i]);
+			if(i < os.nstations-1) bfill.emit_p(PSTR(","));
+		}
+		bfill.emit_p(PSTR("]"));
 		bfill.emit_p(PSTR("]"));
 		if(pid!=pd.nprograms-1) {
 			bfill.emit_p(PSTR(","));

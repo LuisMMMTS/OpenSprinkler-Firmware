@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 
 PW = "a6d82bced638de3def1e9bbb4983225c"  # md5("opendoor"), the factory default
-PORT = 8181  # DEMO build forces the port at compile time via -DHTTP_PORT
+PORT = 8185  # DEMO build forces the port at compile time via -DHTTP_PORT
 BASE = f"http://127.0.0.1:{PORT}"
 
 # OpenSprinkler API result codes
@@ -163,16 +163,26 @@ PROG_EN_DATERANGE = 1 << 7  # en_daterange is the last 1-bit field of the flag b
 DEFAULT_FLAG = PROG_ENABLED | PROG_FIXED_START
 
 
-def make_program(durations, fert=None, name="test", start=0, flag=DEFAULT_FLAG):
-    """Build the packed `v=` payload for /cp."""
-    ns = len(durations)
+# The program object is stock-compatible: v= carries only
+#   [flag, days0, days1, [starttimes], [durations]]
+# and fertigation seconds travel in a separate "pf" parameter, so v= is
+# byte-identical to what the stock UI sends. In /jp output the name stays at
+# index 5, the date range at 6, the sensor adjustment at 7, and the fertigation
+# array is appended as a trailing field at index 8 (which the stock UI ignores).
+IDX_NAME, IDX_DATERANGE, IDX_SNADJ, IDX_FERT = 5, 6, 7, 8
+
+
+def make_program(durations, start=0, flag=DEFAULT_FLAG):
+    """Build the stock-compatible `v=` payload for /cp (no fertigation)."""
     starts = [start, -1, -1, -1]
     v = f"[{flag},127,0,[{','.join(str(s) for s in starts)}],"
-    v += f"[{','.join(str(d) for d in durations)}]"
-    if fert is not None:
-        v += f",[{','.join(str(f) for f in fert[:ns])}]"
-    v += "]"
+    v += f"[{','.join(str(d) for d in durations)}]]"
     return v
+
+
+def fert_param(fert):
+    """The pf= value for a fertigation-seconds list."""
+    return "[" + ",".join(str(f) for f in fert) + "]"
 
 
 def get_program(pid=0):
@@ -180,55 +190,59 @@ def get_program(pid=0):
 
 
 def test_program_fert_roundtrip():
-    print("\n[/cp, /jp] fertigation durations in programs")
+    print("\n[/cp, /jp, pf] fertigation durations in programs")
     clear_programs()
     ns = nstations()
 
     durs = [60] + [0] * (ns - 1)
     ferts = [20] + [0] * (ns - 1)
-    r = api("cp", pid=-1, v=make_program(durs, ferts, "ferttest"), name="ferttest")
-    check("program with a fertigation array is accepted", r["result"] == OK, f"got {r}")
+    r = api("cp", pid=-1, v=make_program(durs), name="ferttest", pf=fert_param(ferts))
+    check("program with a pf fertigation parameter is accepted", r["result"] == OK, f"got {r}")
 
     p = get_program(0)
-    check("program round-trips with the fertigation array present", len(p) >= 6,
+    check("fertigation array is appended as a trailing field", len(p) > IDX_FERT,
           f"program entry has {len(p)} fields: {p}")
-    if len(p) >= 6:
-        check("fertigation durations survive the round-trip",
-              p[5][0] == 20 and all(x == 0 for x in p[5][1:]),
-              f"got {p[5]}")
-        check("station durations are unaffected by the fertigation array",
-              p[4][0] == 60, f"got {p[4]}")
+    if len(p) > IDX_FERT:
+        check("fertigation durations survive the round-trip at index 8",
+              p[IDX_FERT][0] == 20 and all(x == 0 for x in p[IDX_FERT][1:]),
+              f"got {p[IDX_FERT]}")
+        check("station durations are unaffected", p[4][0] == 60, f"got {p[4]}")
+        check("name is at index 5, where the stock UI reads it",
+              p[IDX_NAME] == "ferttest", f"got {p[IDX_NAME]!r}")
 
+    # A stock-style save with no pf parameter must work and mean "no fertigation"
     clear_programs()
-    r = api("cp", pid=-1, v=make_program(durs, None, "nofert"), name="nofert")
-    check("program with NO fertigation array is still accepted (backward compat)",
-          r["result"] == OK, f"got {r}")
+    r = api("cp", pid=-1, v=make_program(durs), name="nofert")
+    check("stock-style program (no pf) is accepted", r["result"] == OK, f"got {r}")
     p = get_program(0)
-    if len(p) >= 6:
-        check("omitted fertigation array defaults to all zeros",
-              all(x == 0 for x in p[5]), f"got {p[5]}")
+    check("name still at index 5 without pf", p[IDX_NAME] == "nofert", f"got {p[IDX_NAME]!r}")
+    if len(p) > IDX_FERT:
+        check("omitted fertigation defaults to all zeros",
+              all(x == 0 for x in p[IDX_FERT]), f"got {p[IDX_FERT]}")
 
 
 def test_program_name_and_daterange():
-    """Regression for 226c51d: name and date range parsing broke when the
-    fertigation array was appended to the packed program payload."""
-    print("\n[/cp, /jp] program name and date range (regression 226c51d)")
+    """The name, date range and sensor adjustment must sit at the stock indices
+    (5, 6, 7) so the stock UI reads them correctly; fertigation is a trailing
+    extra."""
+    print("\n[/cp, /jp] stock-compatible field positions")
     clear_programs()
     ns = nstations()
     durs = [60] + [0] * (ns - 1)
     ferts = [20] + [0] * (ns - 1)
 
     r = api("cp", pid=-1,
-            v=make_program(durs, ferts, flag=DEFAULT_FLAG | PROG_EN_DATERANGE),
-            name="MyProgram", **{"from": 33, "to": 415})
-    check("program with name + date range is accepted", r["result"] == OK, f"got {r}")
+            v=make_program(durs, flag=DEFAULT_FLAG | PROG_EN_DATERANGE),
+            name="MyProgram", pf=fert_param(ferts), **{"from": 33, "to": 415})
+    check("program with name + date range + pf is accepted", r["result"] == OK, f"got {r}")
 
     p = get_program(0)
-    check("program name is not corrupted by the fertigation array",
-          p[6] == "MyProgram", f"got name {p[6]!r}")
-    check("date range enable flag round-trips", p[7][0] == 1, f"got {p[7]}")
-    check("date range values round-trip", p[7][1] == 33 and p[7][2] == 415,
-          f"got {p[7]}")
+    check("name at index 5 (stock position)", p[IDX_NAME] == "MyProgram", f"got {p[IDX_NAME]!r}")
+    check("date range enable flag at index 6", p[IDX_DATERANGE][0] == 1, f"got {p[IDX_DATERANGE]}")
+    check("date range values at index 6",
+          p[IDX_DATERANGE][1] == 33 and p[IDX_DATERANGE][2] == 415, f"got {p[IDX_DATERANGE]}")
+    check("fertigation is the trailing field at index 8",
+          p[IDX_FERT][0] == 20, f"got {p[IDX_FERT]}")
 
 
 def test_runonce_fert_accepted():
@@ -406,7 +420,7 @@ def test_manual_program_start_fertigates():
     durs[zone] = station_dur
     ferts = [0] * ns
     ferts[zone] = fert_dur
-    r = api("cp", pid=-1, v=make_program(durs, ferts), name="ManualFert")
+    r = api("cp", pid=-1, v=make_program(durs), name="ManualFert", pf=fert_param(ferts))
     check("program created for the manual-start test", r["result"] == OK, f"got {r}")
 
     # /mp takes a 0-based program index, unlike the 1-based pid the queue and
@@ -458,7 +472,7 @@ def test_scheduled_program_fertigates():
     # Start on the next whole minute so the scheduler picks it up on its own.
     now = api("jc")["devt"]
     start_min = ((now % 86400) // 60 + 1) % 1440
-    r = api("cp", pid=-1, v=make_program(durs, ferts, start=start_min), name="SchedFert")
+    r = api("cp", pid=-1, v=make_program(durs, start=start_min), name="SchedFert", pf=fert_param(ferts))
     check("scheduled program created", r["result"] == OK, f"got {r}")
 
     wait = 65 - (api("jc")["devt"] % 60)
@@ -550,7 +564,7 @@ def _spawn(binary, datadir):
     )
 
 
-def _wait_until_up(timeout=20):
+def _wait_until_up(timeout=60):
     for _ in range(timeout * 2):
         try:
             api("jc")
@@ -665,7 +679,7 @@ def main():
     )
 
     try:
-        for _ in range(40):
+        for _ in range(120):
             try:
                 api("jc")
                 break

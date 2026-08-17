@@ -60,9 +60,10 @@ void set_runonce(unsigned char sid, int seconds); // ignores values <= 0
 
 // ---- program payload ----
 
-/** Parse the optional trailing "[fd0,fd1,...]" array of a /cp payload.
- *  Advances *pv past the array. Zeroes the durations when absent, which is
- *  what keeps pre-fertigation clients working. */
+/** Parse a "[s0,s1,...]" fertigation-seconds array (the /cp "pf" parameter).
+ *  Advances *pv past the array; zeroes the durations when the string does not
+ *  start with '['. Kept separate from the v= program array so v= stays
+ *  byte-compatible with the stock UI, which never sends fertigation. */
 void parse_program_array(ProgramStruct &prog, char **pv);
 
 // ---- scheduler ----
