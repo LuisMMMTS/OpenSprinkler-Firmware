@@ -1639,6 +1639,14 @@ void manual_start_program(unsigned char pid, unsigned char uwt, unsigned char qo
 		order[sid] = sid;
 	}
 
+	// A manually started program is queued under RUNONCE_PID, not under its own
+	// index, so the scheduler cannot look its fertigation durations up from the
+	// program the way it does for a scheduled run. Stage them in the run-once
+	// buffer instead; without this, "run this program now" waters the zones but
+	// silently never fertigates. Cleared unconditionally so a previous run-once
+	// cannot leak into a manual start.
+	Fertigation::clear_runonce();
+
 	unsigned char wl = 100;
 	if ((pid>0)&&(pid<255)) {
 		pd.read(pid-1, &prog);
@@ -1647,6 +1655,12 @@ void manual_start_program(unsigned char pid, unsigned char uwt, unsigned char qo
 		notif.add(NOTIFY_PROGRAM_SCHED, pid-1, wl, 1, sensor_adj);
 		// get station ordering from program name
 		prog.gen_station_runorder(1, order);
+		// Raw, not weather-scaled: this mirrors what Fertigation::tick() reads
+		// straight from the program on the scheduled path, so both routes give
+		// the same fertigation window.
+		for(unsigned char fsid=0; fsid<ns; fsid++) {
+			Fertigation::set_runonce(fsid, prog.fert_duration[fsid]);
+		}
 	}
 
 	for(unsigned char oi=0;oi<ns;oi++) {

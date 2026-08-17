@@ -385,6 +385,106 @@ def test_fert_duration_clamped_to_station():
     time.sleep(1)
 
 
+def test_manual_program_start_fertigates():
+    """A program started by hand must fertigate, like a scheduled one.
+
+    /mp queues its stations under RUNONCE_PID rather than the program index, so
+    the scheduler cannot find the program's fertigation durations by itself.
+    Before this was staged into the run-once buffer, "run this program now"
+    watered the zones and silently skipped fertigation entirely -- which every
+    earlier runtime test missed by only ever driving /cr.
+    """
+    print("\n[runtime] a manually started program still fertigates")
+    clear_programs()
+    ns = nstations()
+    fert_sid, zone = ns - 1, 0
+    api("cf", fs=fert_sid)
+
+    station_dur, fert_dur = 30, 10
+    durs = [0] * ns
+    durs[zone] = station_dur
+    ferts = [0] * ns
+    ferts[zone] = fert_dur
+    r = api("cp", pid=-1, v=make_program(durs, ferts), name="ManualFert")
+    check("program created for the manual-start test", r["result"] == OK, f"got {r}")
+
+    # /mp takes a 0-based program index, unlike the 1-based pid the queue and
+    # the logs use.
+    r = api("mp", pid=0, uwt=0)
+    check("manual start accepted", r["result"] == OK, f"got {r}")
+
+    expected_on = (station_dur - fert_dur) // 2
+    t0 = time.time()
+    zone_on = fert_on = None
+    while time.time() - t0 < station_dur + 8:
+        b = station_bits()
+        now = time.time() - t0
+        if zone_on is None and b[zone] == 1:
+            zone_on = now
+        if zone_on is not None and fert_on is None and b[fert_sid] == 1:
+            fert_on = now - zone_on
+        time.sleep(0.5)
+
+    check("the zone ran", zone_on is not None)
+    check("fertigation opened during a manually started program",
+          fert_on is not None,
+          "the valve never opened: the program's fertigation was not staged")
+    if fert_on is not None:
+        check(f"and it was centred (~{expected_on}s in)",
+              abs(fert_on - expected_on) <= 3.0,
+              f"opened at +{fert_on:.1f}s, expected +{expected_on}s")
+
+    api("cv", rsn=1)
+    clear_programs()
+    time.sleep(1)
+
+
+def test_scheduled_program_fertigates():
+    """The scheduled path reads fertigation from the program itself. Covered
+    separately from the manual path because the two resolve it differently."""
+    print("\n[runtime] a scheduled program fertigates")
+    clear_programs()
+    ns = nstations()
+    fert_sid, zone = ns - 1, 0
+    api("cf", fs=fert_sid)
+
+    station_dur, fert_dur = 30, 10
+    durs = [0] * ns
+    durs[zone] = station_dur
+    ferts = [0] * ns
+    ferts[zone] = fert_dur
+
+    # Start on the next whole minute so the scheduler picks it up on its own.
+    now = api("jc")["devt"]
+    start_min = ((now % 86400) // 60 + 1) % 1440
+    r = api("cp", pid=-1, v=make_program(durs, ferts, start=start_min), name="SchedFert")
+    check("scheduled program created", r["result"] == OK, f"got {r}")
+
+    wait = 65 - (api("jc")["devt"] % 60)
+    print(f"        waiting {wait}s for the scheduled start...")
+    deadline = time.time() + wait + station_dur + 10
+    zone_on = fert_on = None
+    while time.time() < deadline:
+        b = station_bits()
+        if zone_on is None and b[zone] == 1:
+            zone_on = time.time()
+        if zone_on is not None and fert_on is None and b[fert_sid] == 1:
+            fert_on = time.time() - zone_on
+        time.sleep(0.5)
+
+    check("the scheduled run started on its own", zone_on is not None,
+          "the program never fired")
+    check("fertigation opened during the scheduled run", fert_on is not None,
+          "the valve never opened")
+    if fert_on is not None:
+        check("and it was centred", abs(fert_on - (station_dur - fert_dur) // 2) <= 4.0,
+              f"opened at +{fert_on:.1f}s")
+
+    api("cv", rsn=1)
+    clear_programs()
+    time.sleep(1)
+
+
 def test_zero_fert_duration_never_opens():
     print("\n[runtime] fertigation duration of 0 never opens the valve")
     clear_programs()
@@ -562,6 +662,8 @@ def main():
         test_program_name_and_daterange()
         test_runonce_fert_accepted()
         test_fert_station_not_directly_schedulable()
+        test_manual_program_start_fertigates()
+        test_scheduled_program_fertigates()
         test_fert_timing_is_centred()
         test_fert_duration_clamped_to_station()
         test_zero_fert_duration_never_opens()
