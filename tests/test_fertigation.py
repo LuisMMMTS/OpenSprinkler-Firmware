@@ -29,6 +29,7 @@ against an OSPI build.
 """
 
 import json
+import re
 import os
 import shutil
 import signal
@@ -485,6 +486,37 @@ def test_scheduled_program_fertigates():
     time.sleep(1)
 
 
+def test_home_page_serves_configured_ui():
+    """The controller's home page must load the UI from the jsp option.
+
+    This fork's program format is incompatible with the stock OpenSprinkler UI,
+    so a unit serving the wrong UI silently misreads every program (the name
+    reads as the fertigation array). This pins the home page <-> jsp link so a
+    default reverting to stock is caught, not discovered in the field.
+    """
+    print("\n[/, /jc] home page serves the configured UI")
+    jc = api("jc")
+    jsp = jc.get("jsp")
+    check("jsp is reported by /jc", bool(jsp), f"jsp={jsp!r}")
+
+    try:
+        with urllib.request.urlopen(f"{BASE}/", timeout=10) as r:
+            home = r.read().decode(errors="replace")
+    except Exception as e:
+        check("home page is served", False, str(e))
+        return
+
+    src = ""
+    m = re.search(r'<script src="([^"]+)/home\.js"', home)
+    if m:
+        src = m.group(1)
+    check("home page loads home.js from the jsp URL",
+          src == jsp, f"script src base={src!r} vs jsp={jsp!r}")
+    check("the served UI is not the stock UI unless jsp says so",
+          ("ui.opensprinkler.com" not in src) or ("ui.opensprinkler.com" in (jsp or "")),
+          f"home.js came from {src!r}")
+
+
 def test_zero_fert_duration_never_opens():
     print("\n[runtime] fertigation duration of 0 never opens the valve")
     clear_programs()
@@ -664,6 +696,7 @@ def main():
         test_fert_station_not_directly_schedulable()
         test_manual_program_start_fertigates()
         test_scheduled_program_fertigates()
+        test_home_page_serves_configured_ui()
         test_fert_timing_is_centred()
         test_fert_duration_clamped_to_station()
         test_zero_fert_duration_never_opens()

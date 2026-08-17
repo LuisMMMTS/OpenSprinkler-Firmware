@@ -182,7 +182,15 @@ enum {
 /** Default string option values */
 #define DEFAULT_PASSWORD          "a6d82bced638de3def1e9bbb4983225c"  // md5 of 'opendoor'
 #define DEFAULT_LOCATION          "42.36,-71.06"  // Boston,MA
+// The UI this firmware serves via the "jsp" option. This fork's program format
+// (fertigation array at index 5, name at 6) is NOT understood by the stock
+// OpenSprinkler UI, so a unit that falls back to the stock default silently
+// misreads every program. The default is therefore overridable at build time
+// -- set OS_UI_URL before build.sh to bake this deployment's UI into the image,
+// so a fresh data directory serves the correct UI instead of reverting to stock.
+#ifndef DEFAULT_JAVASCRIPT_URL
 #define DEFAULT_JAVASCRIPT_URL    "https://ui.opensprinkler.com/js"
+#endif
 #define DEFAULT_WEATHER_URL       "weather.opensprinkler.com"
 #define DEFAULT_IFTTT_URL         "maker.ifttt.com"
 #define DEFAULT_OTC_SERVER_DEV     "ws.cloud.openthings.io"

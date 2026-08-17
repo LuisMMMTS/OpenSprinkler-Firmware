@@ -22,6 +22,15 @@ function enable_i2c {
 
 DEBUG=""
 
+# Bake this deployment's UI URL into the firmware so a fresh unit serves the
+# correct (fork) UI rather than the incompatible stock one. Export OS_UI_URL
+# before running, e.g. OS_UI_URL=http://192.168.1.180:8080/js
+UIURL=""
+if [ -n "$OS_UI_URL" ]; then
+	UIURL="-DDEFAULT_JAVASCRIPT_URL=\"$OS_UI_URL\""
+	echo "Baking UI URL: $OS_UI_URL"
+fi
+
 while getopts ":s:d" opt; do
   case $opt in
     s)
@@ -49,7 +58,7 @@ if [ "$1" == "demo" ]; then
     ws=$(ls external/TinyWebsockets/tiny_websockets_lib/src/*.cpp)
     otf=$(ls external/OpenThings-Framework-Firmware-Library/*.cpp)
     sens=$(ls sensors/*.cpp)
-    g++ -o OpenSprinkler -DDEMO -DSMTP_OPENSSL $DEBUG -std=c++14 -include string.h -include cstdint main.cpp OpenSprinkler.cpp program.cpp fertigation.cpp opensprinkler_server.cpp utils.cpp weather.cpp gpio.cpp mqtt.cpp notifier.cpp smtp.c RCSwitch.cpp ads1115.cpp $sens -Iexternal/TinyWebsockets/tiny_websockets_lib/include $ws -Iexternal/OpenThings-Framework-Firmware-Library/ $otf -lpthread -lmosquitto -lssl -lcrypto
+    g++ -o OpenSprinkler -DDEMO -DSMTP_OPENSSL $DEBUG $UIURL -std=c++14 -include string.h -include cstdint main.cpp OpenSprinkler.cpp program.cpp fertigation.cpp opensprinkler_server.cpp utils.cpp weather.cpp gpio.cpp mqtt.cpp notifier.cpp smtp.c RCSwitch.cpp ads1115.cpp $sens -Iexternal/TinyWebsockets/tiny_websockets_lib/include $ws -Iexternal/OpenThings-Framework-Firmware-Library/ $otf -lpthread -lmosquitto -lssl -lcrypto
 else
 	echo "Installing required libraries..."
 	apt-get update
@@ -65,7 +74,7 @@ else
     ws=$(ls external/TinyWebsockets/tiny_websockets_lib/src/*.cpp)
     otf=$(ls external/OpenThings-Framework-Firmware-Library/*.cpp)
     sens=$(ls sensors/*.cpp)
-    g++ -o OpenSprinkler -DOSPI -DSMTP_OPENSSL $DEBUG -std=c++14 -include string.h -include cstdint main.cpp OpenSprinkler.cpp program.cpp fertigation.cpp opensprinkler_server.cpp utils.cpp weather.cpp gpio.cpp mqtt.cpp notifier.cpp smtp.c RCSwitch.cpp i2cd.cpp ads1115.cpp $sens -Iexternal/TinyWebsockets/tiny_websockets_lib/include $ws -Iexternal/OpenThings-Framework-Firmware-Library/ $otf -lpthread -lmosquitto -lssl -lcrypto -li2c $GPIOLIB
+    g++ -o OpenSprinkler -DOSPI -DSMTP_OPENSSL $DEBUG $UIURL -std=c++14 -include string.h -include cstdint main.cpp OpenSprinkler.cpp program.cpp fertigation.cpp opensprinkler_server.cpp utils.cpp weather.cpp gpio.cpp mqtt.cpp notifier.cpp smtp.c RCSwitch.cpp i2cd.cpp ads1115.cpp $sens -Iexternal/TinyWebsockets/tiny_websockets_lib/include $ws -Iexternal/OpenThings-Framework-Firmware-Library/ $otf -lpthread -lmosquitto -lssl -lcrypto -li2c $GPIOLIB
 
 fi
 
