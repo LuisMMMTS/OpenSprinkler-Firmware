@@ -163,26 +163,25 @@ PROG_EN_DATERANGE = 1 << 7  # en_daterange is the last 1-bit field of the flag b
 DEFAULT_FLAG = PROG_ENABLED | PROG_FIXED_START
 
 
-# The program object is stock-compatible: v= carries only
-#   [flag, days0, days1, [starttimes], [durations]]
-# and fertigation seconds travel in a separate "pf" parameter, so v= is
-# byte-identical to what the stock UI sends. In /jp output the name stays at
-# index 5, the date range at 6, the sensor adjustment at 7, and the fertigation
-# array is appended as a trailing field at index 8 (which the stock UI ignores).
+# v= carries [flag, days0, days1, [starttimes], [durations]] and, when the
+# program has fertigation, a trailing [fertigation] array right after the
+# durations -- so fertigation is written atomically with the durations in the
+# same request and can never be dropped. In /jp output the name stays at index
+# 5, the date range at 6, the sensor adjustment at 7, and the fertigation array
+# is emitted as a trailing field at index 8.
 IDX_NAME, IDX_DATERANGE, IDX_SNADJ, IDX_FERT = 5, 6, 7, 8
 
 
-def make_program(durations, start=0, flag=DEFAULT_FLAG):
-    """Build the stock-compatible `v=` payload for /cp (no fertigation)."""
+def make_program(durations, start=0, flag=DEFAULT_FLAG, fert=None):
+    """Build the `v=` payload for /cp. Fertigation seconds, when given, travel
+    inside v= immediately after the durations, saved atomically with them."""
     starts = [start, -1, -1, -1]
     v = f"[{flag},127,0,[{','.join(str(s) for s in starts)}],"
-    v += f"[{','.join(str(d) for d in durations)}]]"
+    v += f"[{','.join(str(d) for d in durations)}]"
+    if fert is not None:
+        v += f",[{','.join(str(f) for f in fert)}]"
+    v += "]"
     return v
-
-
-def fert_param(fert):
-    """The pf= value for a fertigation-seconds list."""
-    return "[" + ",".join(str(f) for f in fert) + "]"
 
 
 def get_program(pid=0):
@@ -190,14 +189,14 @@ def get_program(pid=0):
 
 
 def test_program_fert_roundtrip():
-    print("\n[/cp, /jp, pf] fertigation durations in programs")
+    print("\n[/cp, /jp] fertigation durations in programs")
     clear_programs()
     ns = nstations()
 
     durs = [60] + [0] * (ns - 1)
     ferts = [20] + [0] * (ns - 1)
-    r = api("cp", pid=-1, v=make_program(durs), name="ferttest", pf=fert_param(ferts))
-    check("program with a pf fertigation parameter is accepted", r["result"] == OK, f"got {r}")
+    r = api("cp", pid=-1, v=make_program(durs, fert=ferts), name="ferttest")
+    check("program with a fertigation array in v= is accepted", r["result"] == OK, f"got {r}")
 
     p = get_program(0)
     check("fertigation array is appended as a trailing field", len(p) > IDX_FERT,
@@ -232,8 +231,8 @@ def test_program_name_and_daterange():
     ferts = [20] + [0] * (ns - 1)
 
     r = api("cp", pid=-1,
-            v=make_program(durs, flag=DEFAULT_FLAG | PROG_EN_DATERANGE),
-            name="MyProgram", pf=fert_param(ferts), **{"from": 33, "to": 415})
+            v=make_program(durs, flag=DEFAULT_FLAG | PROG_EN_DATERANGE, fert=ferts),
+            name="MyProgram", **{"from": 33, "to": 415})
     check("program with name + date range + pf is accepted", r["result"] == OK, f"got {r}")
 
     p = get_program(0)
@@ -420,7 +419,7 @@ def test_manual_program_start_fertigates():
     durs[zone] = station_dur
     ferts = [0] * ns
     ferts[zone] = fert_dur
-    r = api("cp", pid=-1, v=make_program(durs), name="ManualFert", pf=fert_param(ferts))
+    r = api("cp", pid=-1, v=make_program(durs, fert=ferts), name="ManualFert")
     check("program created for the manual-start test", r["result"] == OK, f"got {r}")
 
     # /mp takes a 0-based program index, unlike the 1-based pid the queue and
@@ -472,7 +471,7 @@ def test_scheduled_program_fertigates():
     # Start on the next whole minute so the scheduler picks it up on its own.
     now = api("jc")["devt"]
     start_min = ((now % 86400) // 60 + 1) % 1440
-    r = api("cp", pid=-1, v=make_program(durs, start=start_min), name="SchedFert", pf=fert_param(ferts))
+    r = api("cp", pid=-1, v=make_program(durs, start=start_min, fert=ferts), name="SchedFert")
     check("scheduled program created", r["result"] == OK, f"got {r}")
 
     wait = 65 - (api("jc")["devt"] % 60)

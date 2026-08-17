@@ -58,14 +58,6 @@ bool set_station(unsigned char sid);
 void clear_runonce();
 void set_runonce(unsigned char sid, int seconds); // ignores values <= 0
 
-// ---- program payload ----
-
-/** Parse a "[s0,s1,...]" fertigation-seconds array (the /cp "pf" parameter).
- *  Advances *pv past the array; zeroes the durations when the string does not
- *  start with '['. Kept separate from the v= program array so v= stays
- *  byte-compatible with the stock UI, which never sends fertigation. */
-void parse_program_array(ProgramStruct &prog, char **pv);
-
 // ---- scheduler ----
 
 /** Evaluate every running station and open or close the fertigation valve.

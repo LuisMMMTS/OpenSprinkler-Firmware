@@ -957,18 +957,23 @@ void server_change_program(OTF_PARAMS_DEF) {
 		uint16_t pre = parse_listdata(&pv);
 		prog.durations[i] = pre;
 	}
-	pv++; // this should be a ']'
-	pv++; // this should be a ']' (closes v=; the array ends at durations, as stock)
-	// parse program name
+	// parse_listdata consumes the delimiter after each value, so after the last
+	// duration pv already points past the durations' closing ']': at the ','
+	// before a fertigation array, or at the v= closing ']' when none follows.
 
-	// Fertigation durations arrive in a separate "pf" parameter rather than
-	// inside v=, so v= is byte-identical to what the stock UI sends. Stock
-	// clients omit pf and the program simply carries no fertigation.
-	if (findKeyVal(FKV_SOURCE, tmp_buffer, TMP_BUFFER_SIZE, PSTR("pf"), true)) {
-		char *pfp = tmp_buffer;
-		Fertigation::parse_program_array(prog, &pfp);
-	} else {
-		memset(prog.fert_duration, 0, sizeof(prog.fert_duration));
+	// Fertigation durations travel inside v=, immediately after the station
+	// durations, and are parsed with the very same loop -- so they are written
+	// in the same atomic request and can never be dropped by a client that
+	// forgets a separate parameter, exactly like the durations themselves. The
+	// array is optional only for tolerance of a shorter payload; unused
+	// stations are zero-filled.
+	memset(prog.fert_duration, 0, sizeof(prog.fert_duration));
+	if (*pv == ',') {
+		pv++; // ',' separating the durations and fertigation arrays
+		pv++; // '[' opening the fertigation array
+		for (i=0;i<os.nstations;i++) {
+			prog.fert_duration[i] = parse_listdata(&pv);
+		}
 	}
 
 	// i should be equal to os.nstations at this point

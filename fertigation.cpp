@@ -97,20 +97,6 @@ void set_runonce(unsigned char sid, int seconds) {
 	}
 }
 
-// ---- program payload ----
-
-void parse_program_array(ProgramStruct &prog, char **pv) {
-	if (**pv == '[') {
-		(*pv)++; // skip '['
-		for (unsigned char i = 0; i < os.nstations; i++) {
-			prog.fert_duration[i] = parse_listdata(pv);
-		}
-		(*pv)++; // skip ']'
-	} else {
-		memset(prog.fert_duration, 0, sizeof(prog.fert_duration));
-	}
-}
-
 // ---- scheduler ----
 
 void station_turned_off(unsigned char sid) {
