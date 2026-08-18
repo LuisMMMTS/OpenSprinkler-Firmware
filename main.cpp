@@ -1034,6 +1034,23 @@ void do_loop()
 			}
 		}
 
+		// handle fertigation valve on/off notif events. The fertigation valve is
+		// a special station switched directly by Fertigation::tick (not via
+		// turn_on_station), so, like the master valve above, it needs its own
+		// transition watch here to publish station/<fert> over MQTT.
+		if (Fertigation::station < os.nstations) {
+			static time_os_t fert_laston = 0;
+			unsigned char fertbit = os.get_station_bit(Fertigation::station);
+			if (!fert_laston && fertbit) {          // fertigation valve turning on
+				notif.add(NOTIFY_STATION_ON, Fertigation::station, 0);
+				fert_laston = curr_time;
+			}
+			if (fert_laston > 0 && !fertbit) {      // fertigation valve turning off
+				notif.add(NOTIFY_STATION_OFF, Fertigation::station, (curr_time > fert_laston) ? (curr_time - fert_laston) : 0);
+				fert_laston = 0;
+			}
+		}
+
 		// activate/deactivate valves
 		os.apply_all_station_bits(overcurrent_monitor);
 
